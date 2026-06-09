@@ -1,0 +1,136 @@
+<mxfile host="65bd71144e">
+  <diagram id="pai-architecture-2026" name="Pai 新架构图">
+    <mxGraphModel dx="1600" dy="980" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1180" math="0" shadow="0" adaptiveColors="auto">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="Pai 新架构图" style="rounded=1;whiteSpace=wrap;html=1;fontSize=26;fontStyle=1;align=center;verticalAlign=middle;fillColor=#111827;strokeColor=#030712;fontColor=#ffffff;spacing=12;" parent="1" vertex="1">
+          <mxGeometry x="520" y="30" width="760" height="64" as="geometry"/>
+        </mxCell>
+        <mxCell id="subtitle" value="Electron Shell + Application Core + Infrastructure Adapters + Local Pai Data" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=14;fontColor=#475569;" parent="1" vertex="1">
+          <mxGeometry x="510" y="100" width="780" height="28" as="geometry"/>
+        </mxCell>
+        <mxCell id="rendererLayer" value="Renderer 层" style="swimlane;html=1;rounded=1;startSize=32;fontSize=16;fontStyle=1;fillColor=#e0f2fe;strokeColor=#0284c7;fontColor=#0f172a;container=1;collapsible=0;" parent="1" vertex="1">
+          <mxGeometry x="100" y="160" width="1600" height="125" as="geometry"/>
+        </mxCell>
+        <mxCell id="rendererUi" value="React Feature UI&#xa;Workspace / Project / Issues / Chat / Settings" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;fillColor=#ffffff;strokeColor=#38bdf8;fontColor=#0f172a;spacing=10;" parent="rendererLayer" vertex="1">
+          <mxGeometry x="160" y="54" width="360" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="rendererProviders" value="Feature State &amp; Providers&#xa;WorkspaceProvider / ProjectProvider / View State" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;fillColor=#ffffff;strokeColor=#38bdf8;fontColor=#0f172a;spacing=10;" parent="rendererLayer" vertex="1">
+          <mxGeometry x="590" y="54" width="390" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="rendererClient" value="Typed Electron Client&#xa;src/renderer/shared/api/electron-client.ts" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;fillColor=#ffffff;strokeColor=#38bdf8;fontColor=#0f172a;spacing=10;" parent="rendererLayer" vertex="1">
+          <mxGeometry x="1050" y="54" width="390" height="58" as="geometry"/>
+        </mxCell>
+        <mxCell id="electronLayer" value="Electron Shell 层" style="swimlane;html=1;rounded=1;startSize=32;fontSize=16;fontStyle=1;fillColor=#fef3c7;strokeColor=#d97706;fontColor=#0f172a;container=1;collapsible=0;" parent="1" vertex="1">
+          <mxGeometry x="100" y="330" width="1600" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="preload" value="Preload Bridge&#xa;contextBridge + ipcRenderer&#xa;window.electronAPI" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;fillColor=#ffffff;strokeColor=#f59e0b;fontColor=#0f172a;spacing=10;" parent="electronLayer" vertex="1">
+          <mxGeometry x="145" y="60" width="330" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="ipcRouter" value="IPC Router&#xa;src/main/electron/ipc-router.ts&#xa;旧 channel 兼容" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;fillColor=#ffffff;strokeColor=#f59e0b;fontColor=#0f172a;spacing=10;" parent="electronLayer" vertex="1">
+          <mxGeometry x="560" y="60" width="330" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="eventBridge" value="Event Bridge&#xa;src/main/electron/event-bridge.ts&#xa;Domain Event → IPC Event" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;fillColor=#ffffff;strokeColor=#f59e0b;fontColor=#0f172a;spacing=10;" parent="electronLayer" vertex="1">
+          <mxGeometry x="975" y="60" width="330" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="windowFactory" value="Window Factory&#xa;src/main/electron/create-window.ts" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;fillColor=#ffffff;strokeColor=#f59e0b;fontColor=#0f172a;spacing=10;" parent="electronLayer" vertex="1">
+          <mxGeometry x="1375" y="60" width="200" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="applicationLayer" value="Application Core 层" style="swimlane;html=1;rounded=1;startSize=32;fontSize=16;fontStyle=1;fillColor=#dcfce7;strokeColor=#16a34a;fontColor=#0f172a;container=1;collapsible=0;" parent="1" vertex="1">
+          <mxGeometry x="100" y="530" width="1600" height="190" as="geometry"/>
+        </mxCell>
+        <mxCell id="paiApplication" value="PaiApplication&#xa;src/main/application/pai-application.ts&#xa;业务命令、查询、Issue 自动运行、Engine Snapshot" style="rounded=1;whiteSpace=wrap;html=1;fontSize=15;fontStyle=1;fillColor=#ffffff;strokeColor=#22c55e;fontColor=#0f172a;spacing=10;" parent="applicationLayer" vertex="1">
+          <mxGeometry x="540" y="56" width="520" height="86" as="geometry"/>
+        </mxCell>
+        <mxCell id="domainModels" value="Domain Models&#xa;src/main/core/models.ts&#xa;Workspace / Project / Issue / Session / Agent" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;fillColor=#f8fafc;strokeColor=#22c55e;fontColor=#0f172a;spacing=10;" parent="applicationLayer" vertex="1">
+          <mxGeometry x="145" y="62" width="330" height="74" as="geometry"/>
+        </mxCell>
+        <mxCell id="appEventBus" value="AppEventBus&#xa;src/main/core/app-event-bus.ts&#xa;workspace.changed / project.changed / agent.output / agent.done" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;fillColor=#f8fafc;strokeColor=#22c55e;fontColor=#0f172a;spacing=10;" parent="applicationLayer" vertex="1">
+          <mxGeometry x="1125" y="56" width="430" height="86" as="geometry"/>
+        </mxCell>
+        <mxCell id="infraLayer" value="Infrastructure Adapter 层" style="swimlane;html=1;rounded=1;startSize=32;fontSize=16;fontStyle=1;fillColor=#ede9fe;strokeColor=#7c3aed;fontColor=#0f172a;container=1;collapsible=0;" parent="1" vertex="1">
+          <mxGeometry x="100" y="770" width="1600" height="180" as="geometry"/>
+        </mxCell>
+        <mxCell id="paiStore" value="PaiStore&#xa;src/main/infra/fs/pai-store.ts&#xa;TOML / JSONL / AGENTS.md 兼容读写" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;fillColor=#ffffff;strokeColor=#8b5cf6;fontColor=#0f172a;spacing=10;" parent="infraLayer" vertex="1">
+          <mxGeometry x="110" y="60" width="330" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="fileWatch" value="FileWatchService&#xa;src/main/infra/fs/file-watch-service.ts&#xa;外部文件变化 → AppEventBus" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;fillColor=#ffffff;strokeColor=#8b5cf6;fontColor=#0f172a;spacing=10;" parent="infraLayer" vertex="1">
+          <mxGeometry x="495" y="60" width="330" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="agentRegistry" value="AgentRegistry&#xa;src/main/infra/agents/agent-registry.ts&#xa;detect agents / list models / resolve command" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;fillColor=#ffffff;strokeColor=#8b5cf6;fontColor=#0f172a;spacing=10;" parent="infraLayer" vertex="1">
+          <mxGeometry x="880" y="60" width="330" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="agentRuntime" value="AgentProcessRuntime&#xa;src/main/infra/agents/agent-process-runtime.ts&#xa;spawn / stream / cancel / done" style="rounded=1;whiteSpace=wrap;html=1;fontSize=14;fillColor=#ffffff;strokeColor=#8b5cf6;fontColor=#0f172a;spacing=10;" parent="infraLayer" vertex="1">
+          <mxGeometry x="1265" y="60" width="330" height="76" as="geometry"/>
+        </mxCell>
+        <mxCell id="externalLayer" value="外部资源" style="swimlane;html=1;rounded=1;startSize=32;fontSize=16;fontStyle=1;fillColor=#fee2e2;strokeColor=#dc2626;fontColor=#0f172a;container=1;collapsible=0;" parent="1" vertex="1">
+          <mxGeometry x="100" y="1000" width="1600" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="paiFiles" value=".pai 数据目录&#xa;pai.toml / threads/*.toml / sessions/*.jsonl / agents.toml" style="shape=cylinder3d;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;size=15;fontSize=14;fillColor=#ffffff;strokeColor=#ef4444;fontColor=#0f172a;spacing=10;" parent="externalLayer" vertex="1">
+          <mxGeometry x="260" y="50" width="360" height="78" as="geometry"/>
+        </mxCell>
+        <mxCell id="agentCli" value="Agent CLI&#xa;codex / pi / claude" style="shape=process;whiteSpace=wrap;html=1;backgroundOutline=1;fontSize=14;fillColor=#ffffff;strokeColor=#ef4444;fontColor=#0f172a;spacing=10;" parent="externalLayer" vertex="1">
+          <mxGeometry x="980" y="55" width="300" height="68" as="geometry"/>
+        </mxCell>
+        <mxCell id="mainComposition" value="Composition Root&#xa;src/main/index.ts&#xa;装配 Store / Registry / Runtime / Watcher / EventBus / IPC" style="rounded=1;whiteSpace=wrap;html=1;fontSize=13;fillColor=#f8fafc;strokeColor=#64748b;fontColor=#0f172a;spacing=8;dashed=1;" parent="1" vertex="1">
+          <mxGeometry x="1310" y="35" width="340" height="92" as="geometry"/>
+        </mxCell>
+        <mxCell id="e1" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#64748b;" parent="1" source="rendererUi" target="rendererProviders" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e2" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#64748b;" parent="1" source="rendererProviders" target="rendererClient" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e3" value="invoke / subscribe" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#64748b;fontSize=12;" parent="1" source="rendererClient" target="preload" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e4" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#64748b;" parent="1" source="preload" target="ipcRouter" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e5" value="commands / queries" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#16a34a;fontSize=12;" parent="1" source="ipcRouter" target="paiApplication" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e6" value="domain types" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#16a34a;fontSize=12;" parent="1" source="paiApplication" target="domainModels" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e7" value="emit events" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#16a34a;fontSize=12;" parent="1" source="paiApplication" target="appEventBus" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e8" value="broadcast" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#d97706;fontSize=12;" parent="1" source="appEventBus" target="eventBridge" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e9" value="IPC events" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#d97706;fontSize=12;" parent="1" source="eventBridge" target="preload" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e10" value="project / issue / session data" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#7c3aed;fontSize=12;" parent="1" source="paiApplication" target="paiStore" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e11" value="watch / unwatch" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#7c3aed;fontSize=12;" parent="1" source="paiApplication" target="fileWatch" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e12" value="detect / models" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#7c3aed;fontSize=12;" parent="1" source="paiApplication" target="agentRegistry" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e13" value="start / cancel / snapshot" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#7c3aed;fontSize=12;" parent="1" source="paiApplication" target="agentRuntime" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e14" value="read / write" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#dc2626;fontSize=12;" parent="1" source="paiStore" target="paiFiles" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e15" value="fs watch" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#dc2626;fontSize=12;" parent="1" source="fileWatch" target="paiFiles" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e16" value="resolve command" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#7c3aed;fontSize=12;" parent="1" source="agentRuntime" target="agentRegistry" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e17" value="spawn process" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#dc2626;fontSize=12;" parent="1" source="agentRuntime" target="agentCli" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="e18" value="output / done" style="endArrow=block;html=1;strokeWidth=2;strokeColor=#16a34a;fontSize=12;" parent="1" source="agentRuntime" target="appEventBus" edge="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
