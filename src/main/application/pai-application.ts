@@ -1,5 +1,7 @@
 import type { WebContents } from 'electron'
 import { AppEventBus } from '../core/app-event-bus'
+import { appendAgentOutputEvent, createAssistantMessageAccumulator, finalizeAssistantMessage, hasAssistantMessageContent } from '../core/agent-output-aggregation'
+import { type TranscriptSourceMeta } from '../core/agent-transcript'
 import { AgentDoneEvent, AgentOutputEvent, AgentRunInput, DotagentsConfig, EngineSnapshot, ProjectIssue, WorkspaceSettings } from '../core/models'
 import { AgentRegistry } from '../infra/agents/agent-registry'
 import { AgentRuntime } from '../infra/agents/agent-runtime'
@@ -124,8 +126,14 @@ export class PaiApplication {
     return this.store.readChatLogs(projectPath, sessionId)
   }
 
-  appendChatLog(projectPath: string, sessionId: string, msg: { role: string; content: string; thinking?: string; parts?: unknown[] }) {
-    return this.store.appendChatLog(projectPath, sessionId, msg)
+  async appendChatLog(projectPath: string, sessionId: string, msg: { role: string; content: string; thinking?: string; parts?: unknown[] }) {
+    const line = await this.store.appendChatLog(projectPath, sessionId, msg)
+    this.events.emit({ type: 'project.changed', projectPath })
+    return line
+  }
+
+  writeTranscriptSource(projectPath: string, sessionId: string, source: TranscriptSourceMeta) {
+    return this.store.writeTranscriptSource(projectPath, sessionId, source)
   }
 
   detectAgents() {
@@ -159,12 +167,16 @@ export class PaiApplication {
 
   async startChat(input: AgentRunInput) {
     const issueId = await this.store.findIssueIdForSession(input.workspacePath, input.sessionId)
-    if (!issueId) return this.launchAgent(input)
+    if (!issueId) {
+      await this.persistUserMessage(input.workspacePath, input.sessionId, input.source, input.userMessage ?? input.message)
+      return this.launchAgent(input)
+    }
 
     await this.store.updateIssueStatus(input.workspacePath, issueId, 'in_progress')
     this.events.emit({ type: 'project.issuesChanged', projectPath: input.workspacePath })
 
     try {
+      await this.persistUserMessage(input.workspacePath, input.sessionId, 'issue', input.userMessage ?? input.message)
       return await this.launchAgent({ ...input, source: 'issue' }, {
         onDone: async (data) => {
           await this.store.updateIssueStatus(input.workspacePath, issueId, data.exitCode === 0 ? 'done' : 'todo')
@@ -185,12 +197,26 @@ export class PaiApplication {
       onDone?: (event: AgentDoneEvent) => void | Promise<void>
     } = {},
   ) {
+    let assistantState = createAssistantMessageAccumulator()
+
     return this.runtime.start(input, {
       onOutput: (event) => {
+        void this.store.writeTranscriptSource(input.workspacePath, event.sessionId, {
+          agentKind: input.agentKind,
+          threadId: event.threadId,
+          turnId: event.turnId,
+          path: event.path,
+          updatedAt: new Date().toISOString(),
+        })
+        assistantState = appendAgentOutputEvent(assistantState, event)
         hooks.onOutput?.(event)
         this.emitAgentOutput(event)
       },
       onDone: async (event) => {
+        if (hasAssistantMessageContent(assistantState) || event.error) {
+          const message = finalizeAssistantMessage(assistantState, event.error)
+          await this.persistAssistantMessage(input.workspacePath, event.sessionId, input.source, message)
+        }
         try {
           await hooks.onDone?.(event)
         } catch (hookError) {
@@ -199,6 +225,74 @@ export class PaiApplication {
         this.emitAgentDone(event)
       },
     })
+      .then(async (result) => {
+        await this.store.writeTranscriptSource(input.workspacePath, result.sessionId, {
+          agentKind: input.agentKind,
+          updatedAt: new Date().toISOString(),
+        })
+        return result
+      })
+  }
+
+  private async persistUserMessage(
+    projectPath: string,
+    sessionId: string | undefined,
+    source: AgentRunInput['source'] | undefined,
+    content: string,
+  ) {
+    const trimmed = content.trim()
+    if (!trimmed) return
+    const parts = [{ type: 'text' as const, text: trimmed }]
+
+    if (source === 'issue' || sessionId?.startsWith('issue-')) {
+      const issueId = sessionId ? await this.resolveIssueIdForSession(projectPath, sessionId) : null
+      if (!issueId) return
+      await this.store.appendIssueLog(projectPath, issueId, {
+        role: 'user',
+        content: trimmed,
+        parts,
+      })
+      return
+    }
+
+    await this.store.appendChatLog(projectPath, sessionId ?? 'default', {
+      role: 'user',
+      content: trimmed,
+      parts,
+    })
+  }
+
+  private async persistAssistantMessage(
+    projectPath: string,
+    sessionId: string,
+    source: AgentRunInput['source'] | undefined,
+    message: { content: string; thinking?: string; parts?: unknown[]; stream?: 'stderr' },
+  ) {
+    if (source === 'issue' || sessionId.startsWith('issue-')) {
+      const issueId = await this.resolveIssueIdForSession(projectPath, sessionId)
+      if (!issueId) return
+      await this.store.appendIssueLog(projectPath, issueId, {
+        role: 'assistant',
+        content: message.content,
+        thinking: message.thinking,
+        parts: message.parts,
+        stream: message.stream,
+      })
+      return
+    }
+
+    await this.store.appendChatLog(projectPath, sessionId, {
+      role: 'assistant',
+      content: message.content,
+      thinking: message.thinking,
+      parts: message.parts,
+      stream: message.stream,
+    })
+  }
+
+  private async resolveIssueIdForSession(projectPath: string, sessionId: string) {
+    if (sessionId.startsWith('issue-')) return sessionId.slice('issue-'.length)
+    return this.store.findIssueIdForSession(projectPath, sessionId)
   }
 
   private emitAgentOutput(data: AgentOutputEvent) {

@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { MessageBubble, appendMessageParts, markMessagePartsDone, normalizeStoredParts, splitAgentOutput, type ChatMessage, type MessagePart } from '@/components/chat/MessageSurface'
+import { MessageBubble, type ChatMessage, type MessagePart } from '@/components/chat/MessageSurface'
 import { ProjectTabs } from '@/components/project/ProjectTabs'
 import { PromptComposer } from '@/components/project/PromptComposer'
 import { PropertyField, PropertyPanel } from '@/components/project/PropertyPanel'
@@ -14,6 +14,16 @@ import { EditableLabels, PRIORITY_OPTIONS, PriorityPicker, STATUS_OPTIONS, Statu
 import { Issue, IssuePriority, IssueStatus, ProjectConfig } from '@/data/project'
 import { cn } from '@/lib/utils'
 import { electronClient } from '@/shared/api/electron-client'
+import {
+  consumeAgentOutput,
+  countRenderableAssistantMessages,
+  createAssistantStreamState,
+  finalizeAssistantStream,
+  hasEquivalentMessage,
+  hasAssistantStreamContent,
+  normalizeLogMessages,
+  type AgentOutputPayload,
+} from '@/shared/agent-output'
 
 const ISSUE_STATUSES: IssueStatus[] = ['backlog', 'todo', 'in_progress', 'done']
 const ISSUE_PRIORITIES: IssuePriority[] = ['urgent', 'high', 'medium', 'low', 'none']
@@ -651,19 +661,26 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
   const saveTimer = useRef<number | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const unsubs = useRef<Array<() => void>>([])
+  const issueStateLoadSeq = useRef(0)
+  const logsRef = useRef<ChatMessage[]>([])
 
   const loadIssueState = useCallback(async () => {
     if (!project?.path) return
     const projectPath = project.path
+    const nextSeq = issueStateLoadSeq.current + 1
+    issueStateLoadSeq.current = nextSeq
     const [loadedIssues, loadedLogs, status] = await Promise.all([
       electronClient?.readIssues(projectPath) ?? Promise.resolve([]),
       electronClient?.readIssueLogs(projectPath, issueId) ?? Promise.resolve([]),
       electronClient?.getAgentStatus(issueSessionId(issueId)) ?? Promise.resolve({ running: false }),
     ])
+    if (issueStateLoadSeq.current !== nextSeq) return null
+    const normalizedLogs = normalizeLogMessages(loadedLogs)
     setIssues(loadedIssues.map(normalizeIssue))
-    setLogs(loadedLogs.map(normalizeIssueLog))
+    setLogs(normalizedLogs)
     setRunning(status.running)
-    setAgentRunStatus(status.running ? 'running' : inferAgentRunStatus(loadedLogs.map(normalizeIssueLog)))
+    setAgentRunStatus(status.running ? 'running' : inferAgentRunStatus(normalizedLogs))
+    return normalizedLogs
   }, [project?.path, issueId])
 
   useEffect(() => {
@@ -677,9 +694,9 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
       ])
       if (cancelled) return
       setIssues(loadedIssues.map(normalizeIssue))
-      setLogs(loadedLogs.map(normalizeIssueLog))
+      setLogs(normalizeLogMessages(loadedLogs))
       setRunning(status.running)
-      setAgentRunStatus(status.running ? 'running' : inferAgentRunStatus(loadedLogs.map(normalizeIssueLog)))
+      setAgentRunStatus(status.running ? 'running' : inferAgentRunStatus(normalizeLogMessages(loadedLogs)))
     })()
 
     return () => {
@@ -688,6 +705,7 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
   }, [project?.path, issueId])
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ block: 'end' }) }, [logs, assistantContent, assistantThinking, assistantParts, running])
+  useEffect(() => { logsRef.current = logs }, [logs])
   useEffect(() => () => unsubs.current.forEach((fn) => fn()), [])
 
   useEffect(() => {
@@ -739,26 +757,41 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
 
   useEffect(() => {
     const runId = issueSessionId(issueId)
+    let passiveAssistantState = createAssistantStreamState()
+    let passiveAssistantBaselineCount: number | null = null
     const unsubscribeOutput = electronClient?.onAgentOutput((data) => {
       if (data.sessionId !== runId || unsubs.current.length > 0) return
-      const parsed = splitAgentOutput(data.text, data.stream)
+      passiveAssistantBaselineCount ??= countRenderableAssistantMessages(logsRef.current)
+      passiveAssistantState = consumeAgentOutput(passiveAssistantState, data as AgentOutputPayload)
       setRunning(true)
       setAgentRunStatus('running')
-      setAssistantThinking((current) => current + parsed.thinking)
-      setAssistantContent((current) => current + parsed.content)
-      setAssistantParts((current) => appendMessageParts(current, parsed.parts))
+      setAssistantThinking(passiveAssistantState.thinking)
+      setAssistantContent(passiveAssistantState.content)
+      setAssistantParts(passiveAssistantState.parts)
     })
     const unsubscribeDone = electronClient?.onAgentDone(async (data) => {
       if (data.sessionId !== runId) return
-      setRunning(false)
+      const assistantMsg = hasAssistantStreamContent(passiveAssistantState) || data.error
+        ? finalizeAssistantStream(passiveAssistantState, data.error)
+        : null
+      const refreshedLogs = await loadIssueState()
+      if (
+        assistantMsg &&
+        (
+          !refreshedLogs ||
+          (
+            !hasEquivalentMessage(refreshedLogs, assistantMsg) &&
+            countRenderableAssistantMessages(refreshedLogs) <= (passiveAssistantBaselineCount ?? countRenderableAssistantMessages(logsRef.current))
+          )
+        )
+      ) {
+        setLogs((prev) => [...prev, assistantMsg])
+      }
+      passiveAssistantState = createAssistantStreamState()
+      passiveAssistantBaselineCount = null
       setAssistantContent('')
       setAssistantThinking('')
       setAssistantParts([])
-      setAgentRunStatus(data.exitCode === 0 ? 'succeeded' : 'failed')
-      if (project?.path) {
-        const loadedLogs = await electronClient?.readIssueLogs(project.path, issueId)
-        if (loadedLogs) setLogs(loadedLogs.map(normalizeIssueLog))
-      }
     })
     return () => {
       unsubscribeOutput?.()
@@ -768,7 +801,11 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
 
   const issue = useMemo(() => issues.find((item) => item.id === issueId), [issueId, issues])
   const allLabels = useMemo(() => uniqueLabels(issues), [issues])
-  const hasStreamingMessage = assistantContent || assistantThinking || assistantParts.length > 0
+  const hasStreamingMessage = hasAssistantStreamContent({
+    content: assistantContent,
+    thinking: assistantThinking,
+    parts: assistantParts,
+  })
   const selectedProject = useMemo(() => {
     if (!project) return undefined
     return projects.find((item) => (
@@ -814,10 +851,10 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
     navigate(`/project/${nextProject.slug}/issues/${issueId}`)
   }, [issueId, navigate, project?.path, project?.slug])
 
-  const handleSubmit = useCallback(async () => {
-    if (!input.trim() || running || !project?.path || !issue) return
+  const handleSubmit = useCallback(async (submittedValue?: string) => {
+    const msg = (submittedValue ?? input).trim()
+    if (!msg || running || !project?.path || !issue) return
     const projectPath = project.path
-    const msg = input.trim()
     const agentPrompt = buildIssuePrompt(issue, logs, msg)
     setInput('')
     setAssistantContent('')
@@ -831,50 +868,45 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
       content: msg,
       parts: [{ type: 'text', text: msg }],
     }
-    await electronClient?.appendIssueLog(projectPath, issueId, { role: 'user', content: msg, parts: userMessage.parts })
     setLogs((prev) => [...prev, userMessage])
     const cfg = await electronClient?.readAgentConfig(projectPath)
     const { agentKind, model, thinking } = readAgentSettings(cfg)
     const runId = issueSessionId(issueId)
-    let content = ''
-    let streamedThinking = ''
-    let streamedParts: MessagePart[] = []
+    const assistantMessagesBeforeRun = countRenderableAssistantMessages(logs)
+    let assistantState = createAssistantStreamState()
     unsubs.current = []
     unsubs.current.push(electronClient!.onAgentOutput((data) => {
       if (data.sessionId !== runId) return
-      const parsed = splitAgentOutput(data.text, data.stream)
-      streamedThinking += parsed.thinking
-      content += parsed.content
-      streamedParts = appendMessageParts(streamedParts, parsed.parts)
-      setAssistantThinking(streamedThinking)
-      setAssistantContent(content)
-      setAssistantParts(streamedParts)
+      assistantState = consumeAgentOutput(assistantState, data as AgentOutputPayload)
+      setAssistantThinking(assistantState.thinking)
+      setAssistantContent(assistantState.content)
+      setAssistantParts(assistantState.parts)
     }))
     unsubs.current.push(electronClient!.onAgentDone(async (data) => {
       if (data.sessionId !== runId) return
       unsubs.current.forEach((fn) => fn())
       unsubs.current = []
+      const assistantMsg = hasAssistantStreamContent(assistantState) || data.error
+        ? finalizeAssistantStream(assistantState, data.error)
+        : null
+      const refreshedLogs = await loadIssueState()
+      if (
+        assistantMsg &&
+        (
+          !refreshedLogs ||
+          (
+            !hasEquivalentMessage(refreshedLogs, assistantMsg) &&
+            countRenderableAssistantMessages(refreshedLogs) <= assistantMessagesBeforeRun
+          )
+        )
+      ) {
+        setLogs((prev) => [...prev, assistantMsg])
+      }
       setRunning(false)
       setAssistantContent('')
       setAssistantThinking('')
       setAssistantParts([])
       setAgentRunStatus(data.exitCode === 0 ? 'succeeded' : 'failed')
-      const assistantMessage: ChatMessage = {
-        id: String(Date.now()),
-        role: 'assistant',
-        content: content.trim() || data.error || 'No output',
-        thinking: streamedThinking.trim() || undefined,
-        parts: streamedParts.length ? markMessagePartsDone(streamedParts) : undefined,
-        stream: data.error ? 'stderr' : undefined,
-      }
-      await electronClient?.appendIssueLog(projectPath, issueId, {
-        role: assistantMessage.role,
-        content: assistantMessage.content,
-        thinking: assistantMessage.thinking,
-        parts: assistantMessage.parts,
-        stream: assistantMessage.stream,
-      })
-      setLogs((prev) => [...prev, assistantMessage])
     }))
     try {
       await electronClient!.startChat({
@@ -882,19 +914,28 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
         model,
         thinking,
         message: agentPrompt,
+        userMessage: msg,
         workspacePath: projectPath,
         sessionId: runId,
       })
-    } catch {
+    } catch (error) {
       unsubs.current.forEach((fn) => fn())
       unsubs.current = []
+      const message = error instanceof Error ? error.message : 'Failed to start agent'
+      setLogs((prev) => [...prev, {
+        id: String(Date.now()),
+        role: 'assistant',
+        content: message,
+        stream: 'stderr',
+        parts: [{ type: 'log', stream: 'stderr', text: message }],
+      }])
       setRunning(false)
       setAssistantContent('')
       setAssistantThinking('')
       setAssistantParts([])
       setAgentRunStatus('failed')
     }
-  }, [input, issue, issueId, project?.path, running])
+  }, [input, issue, issueId, loadIssueState, logs, project?.path, running])
 
   if (!issue) {
     return (
@@ -1052,25 +1093,6 @@ function inferAgentRunStatus(logs: ChatMessage[]): AgentRunStatus {
   if (lastAgentLog.content.startsWith('Agent run failed')) return 'failed'
   if (lastAgentLog.content.startsWith('Agent run started')) return 'idle'
   return 'succeeded'
-}
-
-function normalizeIssueLog(entry: {
-  timestamp?: string
-  role?: string
-  type?: string
-  content?: string
-  thinking?: string
-  parts?: unknown[]
-  stream?: string
-}): ChatMessage {
-  return {
-    id: entry.timestamp ?? String(Date.now()),
-    role: entry.role === 'user' || entry.type === 'user' ? 'user' : 'assistant',
-    content: entry.content ?? '',
-    thinking: typeof entry.thinking === 'string' ? entry.thinking : undefined,
-    parts: normalizeStoredParts(entry.parts),
-    stream: entry.stream === 'stderr' ? 'stderr' : undefined,
-  }
 }
 
 function normalizeIssueStatus(status: string | undefined): IssueStatus {

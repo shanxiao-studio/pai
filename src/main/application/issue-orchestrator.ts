@@ -1,4 +1,5 @@
 import { AppEventBus } from '../core/app-event-bus'
+import { appendAgentOutputEvent, createAssistantMessageAccumulator, finalizeAssistantMessage, hasAssistantMessageContent } from '../core/agent-output-aggregation'
 import { AgentRunInput, EngineSnapshot, IssueOrchestratorConfig, IssueRuntimeState, ProjectIssue } from '../core/models'
 import { AgentRegistry } from '../infra/agents/agent-registry'
 import { AgentRuntime } from '../infra/agents/agent-runtime'
@@ -243,6 +244,10 @@ export class IssueOrchestrator {
         role: 'assistant',
         content: `Agent run started for "${issue.title}".`,
       })
+      await this.store.writeTranscriptSource(projectPath, issueSessionId(issue.id), {
+        agentKind: settings.kind,
+        updatedAt: new Date().toISOString(),
+      })
 
       const input: AgentRunInput = {
         agentKind: settings.kind,
@@ -253,9 +258,18 @@ export class IssueOrchestrator {
         sessionId: issueSessionId(issue.id),
         source: 'issue',
       }
+      let assistantState = createAssistantMessageAccumulator()
 
       await this.runtime.start(input, {
         onOutput: (event) => {
+          void this.store.writeTranscriptSource(projectPath, event.sessionId, {
+            agentKind: settings.kind,
+            threadId: event.threadId,
+            turnId: event.turnId,
+            path: event.path,
+            updatedAt: new Date().toISOString(),
+          })
+          assistantState = appendAgentOutputEvent(assistantState, event)
           this.events.emit({ type: 'agent.output', data: event })
           void this.updateState(projectPath, issue.id, {
             sessionId: event.sessionId,
@@ -264,6 +278,16 @@ export class IssueOrchestrator {
           })
         },
         onDone: async (event) => {
+          if (hasAssistantMessageContent(assistantState) || event.error) {
+            const message = finalizeAssistantMessage(assistantState, event.error)
+            await this.store.appendIssueLog(projectPath, issue.id, {
+              role: 'assistant',
+              content: message.content,
+              thinking: message.thinking,
+              parts: message.parts,
+              stream: message.stream,
+            })
+          }
           this.events.emit({ type: 'agent.done', data: event })
           this.running.delete(key)
 

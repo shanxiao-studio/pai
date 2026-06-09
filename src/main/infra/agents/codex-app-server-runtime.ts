@@ -1,5 +1,7 @@
 import { ChildProcess, spawn } from 'child_process'
 import { createInterface } from 'readline'
+import { buildTranscriptOutput } from '../../core/agent-transcript'
+import type { StoredMessagePart } from '../../core/chat-message-parts'
 import { AgentDoneEvent, AgentRunInput, AgentTokenUsage } from '../../core/models'
 import { AgentRunHooks, AgentRuntime } from './agent-runtime'
 
@@ -92,7 +94,15 @@ export class CodexAppServerRuntime implements AgentRuntime {
     })
 
     proc.stderr?.on('data', (chunk: Buffer) => {
-      hooks.onOutput?.({ sessionId: runId, text: chunk.toString('utf8'), stream: 'stderr', threadId: session.threadId, turnId: session.turnId ?? undefined })
+      hooks.onOutput?.({
+        sessionId: runId,
+        text: chunk.toString('utf8'),
+        stream: 'stderr',
+        threadId: session.threadId,
+        turnId: session.turnId ?? undefined,
+        source: 'codex-app-server',
+        agentKind: 'codex',
+      })
     })
 
     proc.on('error', (error) => {
@@ -167,22 +177,43 @@ export class CodexAppServerRuntime implements AgentRuntime {
     }
 
     if (method === 'agentMessage/delta' && typeof notification.delta === 'string') {
-      params.onOutput?.({
-        sessionId: params.sessionId,
-        text: notification.delta,
-        threadId: params.session.threadId,
-        turnId: params.session.turnId ?? undefined,
-      })
+      this.emitStructuredOutput(params, [{ type: 'text', text: notification.delta }])
       return
     }
 
     if (method === 'reasoningText/delta' && typeof notification.delta === 'string') {
-      params.onOutput?.({
-        sessionId: params.sessionId,
-        text: `thinking: ${notification.delta}`,
-        threadId: params.session.threadId,
-        turnId: params.session.turnId ?? undefined,
-      })
+      this.emitStructuredOutput(params, [{ type: 'thinking', text: notification.delta, state: 'streaming' }])
+      return
+    }
+
+    if (method === 'agentMessage' && isRecord(notification.message)) {
+      const parts = readAppServerMessageParts(notification.message)
+      if (parts.length > 0) {
+        this.emitStructuredOutput(params, parts)
+        return
+      }
+    }
+
+    if (method === 'toolCall/started') {
+      this.emitStructuredOutput(params, [{
+        type: 'tool-call',
+        id: stringValue(notification.id) ?? stringValue(notification.toolCallId),
+        name: stringValue(notification.name) ?? stringValue(notification.toolName) ?? 'tool',
+        args: notification.arguments ?? notification.input,
+        state: 'running',
+      }])
+      return
+    }
+
+    if (method === 'toolCall/completed') {
+      this.emitStructuredOutput(params, [{
+        type: 'tool-result',
+        id: stringValue(notification.id) ?? stringValue(notification.toolCallId),
+        name: stringValue(notification.name) ?? stringValue(notification.toolName) ?? 'tool',
+        result: notification.result ?? notification.output,
+        text: typeof notification.outputText === 'string' ? notification.outputText : readLooseText(notification.result ?? notification.output),
+        isError: notification.isError === true,
+      }])
       return
     }
 
@@ -196,6 +227,37 @@ export class CodexAppServerRuntime implements AgentRuntime {
       params.session.process.kill()
       return
     }
+
+    if (method) {
+      this.emitStructuredOutput(params, [{
+        type: 'event',
+        name: method,
+        text: readLooseText(notification),
+      }])
+    }
+  }
+
+  private emitStructuredOutput(
+    params: {
+      sessionId: string
+      session: RunningCodexSession
+      pending: Map<number, PendingRequest>
+      onOutput?: AgentRunHooks['onOutput']
+      onDone: (event: AgentDoneEvent) => Promise<void>
+    },
+    parts: StoredMessagePart[],
+  ) {
+    if (parts.length === 0) return
+    const output = buildTranscriptOutput(parts)
+    params.onOutput?.({
+      sessionId: params.sessionId,
+      text: output.text,
+      parts,
+      threadId: params.session.threadId,
+      turnId: params.session.turnId ?? undefined,
+      source: 'codex-app-server',
+      agentKind: 'codex',
+    })
   }
 
   private sendRequest(
@@ -235,4 +297,58 @@ function readToken(value: unknown) {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function readAppServerMessageParts(message: Record<string, unknown>) {
+  const content = Array.isArray(message.content) ? message.content : []
+  const parts: StoredMessagePart[] = []
+
+  for (const item of content) {
+    if (!isRecord(item)) continue
+    const type = stringValue(item.type)
+    if ((type === 'text' || type === 'output_text') && typeof item.text === 'string') {
+      parts.push({ type: 'text', text: item.text })
+      continue
+    }
+    if ((type === 'reasoning' || type === 'reasoning_text') && typeof item.text === 'string') {
+      parts.push({ type: 'thinking', text: item.text, state: 'streaming' })
+      continue
+    }
+    if (type === 'tool_call' || type === 'function_call') {
+      parts.push({
+        type: 'tool-call',
+        id: stringValue(item.id) ?? stringValue(item.call_id),
+        name: stringValue(item.name) ?? 'tool',
+        args: item.arguments ?? item.input,
+        state: 'running',
+      })
+      continue
+    }
+    if (type === 'tool_result' || type === 'function_call_output') {
+      parts.push({
+        type: 'tool-result',
+        id: stringValue(item.id) ?? stringValue(item.call_id),
+        name: stringValue(item.name) ?? 'tool',
+        result: item.output ?? item.result,
+        text: typeof item.output_text === 'string' ? item.output_text : readLooseText(item.output ?? item.result),
+        isError: item.is_error === true,
+      })
+    }
+  }
+
+  return parts
+}
+
+function readLooseText(value: unknown): string | undefined {
+  if (typeof value === 'string') return value
+  if (Array.isArray(value)) return value.map((item) => isRecord(item) && typeof item.text === 'string' ? item.text : '').filter(Boolean).join('\n') || undefined
+  if (!isRecord(value)) return undefined
+  if (typeof value.text === 'string') return value.text
+  if (typeof value.message === 'string') return value.message
+  if (typeof value.content === 'string') return value.content
+  return undefined
+}
+
+function stringValue(value: unknown) {
+  return typeof value === 'string' && value.length > 0 ? value : undefined
 }

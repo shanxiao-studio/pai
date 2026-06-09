@@ -16,6 +16,10 @@ export function sessionDir(projectPath: string, sessionId: string) {
   return join(projectPath, '.pai', 'sessions', safeFileName(sessionId))
 }
 
+export function transcriptSourcePath(projectPath: string, sessionId: string) {
+  return join(sessionDir(projectPath, sessionId), 'transcript-source.json')
+}
+
 export function paiRuntimeDir(projectPath: string) {
   return join(projectPath, '.pai', 'runtime')
 }

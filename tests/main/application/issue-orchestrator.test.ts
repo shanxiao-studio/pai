@@ -65,6 +65,7 @@ function createHarness(options: {
     readAgentSettings: vi.fn(() => ({ kind: 'codex', model: 'gpt-5', thinking: 'medium' })),
     readDotagentsConfig: vi.fn(async () => ({ version: 1, gitignore: true, agents: [], skills: [], mcp: [], hooks: [], exists: false })),
     appendIssueLog: vi.fn(async () => undefined),
+    writeTranscriptSource: vi.fn(async () => undefined),
   }
 
   const startCalls: Array<{ hooks?: AgentRunHooks }> = []

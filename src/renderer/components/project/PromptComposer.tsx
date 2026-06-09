@@ -6,7 +6,7 @@ import { cn } from '@/lib/utils'
 interface PromptComposerProps {
   value: string
   onChange: (value: string) => void
-  onSubmit: () => void
+  onSubmit: (value?: string) => void
   placeholder?: string
   disabled?: boolean
   inputDisabled?: boolean
@@ -26,6 +26,10 @@ export function PromptComposer({
   className,
   showTopBorder = true,
 }: PromptComposerProps) {
+  const submitCurrentValue = (valueToSubmit: string) => {
+    if (!disabled) onSubmit(valueToSubmit)
+  }
+
   return (
     <div className={cn('shrink-0 bg-background/80 px-4 py-2 backdrop-blur', showTopBorder && 'border-t', className)}>
       <div className="mx-auto flex max-w-5xl flex-col gap-2 rounded-lg border bg-[hsl(var(--surface-raised))] px-3 py-2 shadow-xl shadow-black/[0.06]">
@@ -36,7 +40,7 @@ export function PromptComposer({
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault()
-                if (!disabled) onSubmit()
+                submitCurrentValue(event.currentTarget.value)
               }
             }}
             placeholder={placeholder}
@@ -54,7 +58,7 @@ export function PromptComposer({
                 {controls}
               </div>
             )}
-            <Button size="icon" className="size-8 shrink-0 rounded-md shadow-sm" onClick={onSubmit} aria-label="Send prompt" disabled={disabled}>
+            <Button size="icon" className="size-8 shrink-0 rounded-md shadow-sm" onClick={() => submitCurrentValue(value)} aria-label="Send prompt" disabled={disabled}>
               <ArrowUp />
             </Button>
           </div>

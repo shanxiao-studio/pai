@@ -50,6 +50,45 @@ export function markMessagePartsDone(parts: StoredMessagePart[]) {
   })
 }
 
+export function summarizeMessageParts(parts: StoredMessagePart[]) {
+  let thinking = ''
+  let content = ''
+  const visibleLines: string[] = []
+
+  for (const part of parts) {
+    if (part.type === 'thinking') {
+      thinking += part.text.endsWith('\n') ? part.text : `${part.text}\n`
+      continue
+    }
+
+    if (part.type === 'text') {
+      content += part.text
+      visibleLines.push(part.text)
+      continue
+    }
+
+    if (part.type === 'tool-result' && part.text) {
+      visibleLines.push(part.text)
+      continue
+    }
+
+    if (part.type === 'event' && part.text) {
+      visibleLines.push(part.text)
+      continue
+    }
+
+    if (part.type === 'log') {
+      visibleLines.push(part.text)
+    }
+  }
+
+  return {
+    thinking,
+    content,
+    plainText: content || visibleLines.join('\n'),
+  }
+}
+
 function parseStructuredAgentOutput(text: string) {
   const lines = text.split('\n').filter(Boolean)
   if (lines.length === 0) return null

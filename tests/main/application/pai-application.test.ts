@@ -41,6 +41,7 @@ function createHarness() {
     appendIssueLog: vi.fn(async () => 'issue-log-line'),
     readChatLogs: vi.fn(async () => [{ role: 'user', content: 'hello' }]),
     appendChatLog: vi.fn(async () => 'chat-log-line'),
+    writeTranscriptSource: vi.fn(async () => undefined),
     findIssueIdForSession: vi.fn(async () => null as string | null),
     updateIssueStatus: vi.fn(async () => undefined),
   }
@@ -167,6 +168,14 @@ describe('PaiApplication delegations', () => {
     await expect(app.writeWorkspaceSettings('/workspace', settings)).resolves.toEqual(settings)
     expect(emitted).toEqual([{ type: 'workspace.changed', workspacePath: '/workspace' }])
   })
+
+  it('emits a project change after appending chat logs', async () => {
+    const { app, emitted } = createHarness()
+
+    await expect(app.appendChatLog('/project', 'session-1', { role: 'assistant', content: 'hello' })).resolves.toBe('chat-log-line')
+
+    expect(emitted).toContainEqual({ type: 'project.changed', projectPath: '/project' })
+  })
 })
 
 describe('PaiApplication orchestrator integration', () => {
@@ -201,5 +210,127 @@ describe('PaiApplication chat agents', () => {
       onOutput: expect.any(Function),
       onDone: expect.any(Function),
     }))
+  })
+
+  it('persists the user message before starting a regular chat agent', async () => {
+    const { app, runtime, store } = createHarness()
+
+    await app.startChat({
+      agentKind: 'codex',
+      model: 'gpt-5',
+      thinking: 'medium',
+      message: 'hello',
+      workspacePath: '/project',
+      sessionId: 'chat-1',
+    })
+
+    expect(store.appendChatLog).toHaveBeenCalledWith('/project', 'chat-1', {
+      role: 'user',
+      content: 'hello',
+      parts: [{ type: 'text', text: 'hello' }],
+    })
+    expect(store.appendChatLog.mock.invocationCallOrder[0]).toBeLessThan(runtime.start.mock.invocationCallOrder[0])
+  })
+
+  it('persists structured assistant output for chat sessions on completion', async () => {
+    const { app, runtime, store } = createHarness()
+    ;(runtime.start as ReturnType<typeof vi.fn>).mockImplementationOnce(async (_input, hooks) => {
+      hooks?.onOutput?.({
+        sessionId: 'chat-1',
+        text: 'answer',
+        parts: [
+          { type: 'thinking', text: 'reasoning', state: 'streaming' },
+          { type: 'text', text: 'answer' },
+          { type: 'tool-call', id: 'tool-1', name: 'read', args: { path: 'a.ts' }, state: 'running' },
+          { type: 'tool-result', id: 'tool-1', name: 'read', text: 'ok' },
+        ],
+        source: 'codex-app-server',
+        agentKind: 'codex',
+        threadId: 'thread-1',
+        turnId: 'turn-1',
+        path: '/tmp/session.jsonl',
+      })
+      await hooks?.onDone?.({ sessionId: 'chat-1', exitCode: 0 })
+      return { sessionId: 'chat-1' }
+    })
+
+    await app.startChat({
+      agentKind: 'codex',
+      model: 'gpt-5',
+      thinking: 'medium',
+      message: 'hello',
+      workspacePath: '/project',
+      sessionId: 'chat-1',
+    })
+
+    expect(store.writeTranscriptSource).toHaveBeenCalledWith('/project', 'chat-1', expect.objectContaining({
+      agentKind: 'codex',
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+      path: '/tmp/session.jsonl',
+    }))
+    expect(store.appendChatLog).toHaveBeenCalledWith('/project', 'chat-1', expect.objectContaining({
+      role: 'assistant',
+      content: 'answer',
+      thinking: 'reasoning',
+      parts: expect.arrayContaining([
+        expect.objectContaining({ type: 'thinking', state: 'done' }),
+        expect.objectContaining({ type: 'tool-call', state: 'done' }),
+        expect.objectContaining({ type: 'tool-result', text: 'ok' }),
+      ]),
+    }))
+  })
+
+  it('persists assistant output to issue logs for issue sessions', async () => {
+    const { app, runtime, store } = createHarness()
+    ;(store.findIssueIdForSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce('1')
+    ;(runtime.start as ReturnType<typeof vi.fn>).mockImplementationOnce(async (_input, hooks) => {
+      hooks?.onOutput?.({
+        sessionId: 'issue-1',
+        text: 'issue answer',
+        parts: [{ type: 'text', text: 'issue answer' }],
+        agentKind: 'pi',
+      })
+      await hooks?.onDone?.({ sessionId: 'issue-1', exitCode: 0 })
+      return { sessionId: 'issue-1' }
+    })
+
+    await app.startChat({
+      agentKind: 'pi',
+      model: 'default',
+      thinking: 'medium',
+      message: 'work',
+      workspacePath: '/project',
+      sessionId: 'issue-1',
+      source: 'issue',
+    })
+
+    expect(store.appendIssueLog).toHaveBeenCalledWith('/project', '1', expect.objectContaining({
+      role: 'assistant',
+      content: 'issue answer',
+    }))
+  })
+
+  it('persists the visible issue user message before starting the issue agent', async () => {
+    const { app, runtime, store } = createHarness()
+    ;(store.findIssueIdForSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce('1')
+
+    await app.startChat({
+      agentKind: 'pi',
+      model: 'default',
+      thinking: 'medium',
+      message: 'internal issue prompt',
+      userMessage: 'visible issue reply',
+      workspacePath: '/project',
+      sessionId: 'issue-1',
+      source: 'issue',
+    })
+
+    expect(store.appendIssueLog).toHaveBeenCalledWith('/project', '1', {
+      role: 'user',
+      content: 'visible issue reply',
+      parts: [{ type: 'text', text: 'visible issue reply' }],
+    })
+    expect(store.appendIssueLog.mock.invocationCallOrder[0]).toBeLessThan(runtime.start.mock.invocationCallOrder[0])
   })
 })

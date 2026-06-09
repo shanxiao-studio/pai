@@ -65,6 +65,45 @@ export function normalizeStoredParts(value: unknown): MessagePart[] | undefined 
   return parts.length ? parts : undefined
 }
 
+export function summarizeMessageParts(parts: MessagePart[]) {
+  let thinking = ''
+  let content = ''
+  const visibleLines: string[] = []
+
+  for (const part of parts) {
+    if (part.type === 'thinking') {
+      thinking += part.text.endsWith('\n') ? part.text : `${part.text}\n`
+      continue
+    }
+
+    if (part.type === 'text') {
+      content += part.text
+      visibleLines.push(part.text)
+      continue
+    }
+
+    if (part.type === 'tool-result' && part.text) {
+      visibleLines.push(part.text)
+      continue
+    }
+
+    if (part.type === 'event' && part.text) {
+      visibleLines.push(part.text)
+      continue
+    }
+
+    if (part.type === 'log') {
+      visibleLines.push(part.text)
+    }
+  }
+
+  return {
+    thinking,
+    content,
+    plainText: content || visibleLines.join('\n'),
+  }
+}
+
 export function splitAgentOutput(text: string, stream?: string) {
   if (stream === 'stderr') {
     return { thinking: '', content: '', parts: [{ type: 'log' as const, stream: 'stderr' as const, text }] }
@@ -116,7 +155,7 @@ function MessagePartView({ part, streaming, isUser }: { part: MessagePart; strea
 
   if (part.type === 'tool-call') {
     return (
-      <ToolFrame icon={<Wrench className="size-3" />} title={part.name} meta={part.state === 'running' ? 'running' : part.state}>
+      <ToolFrame icon={<Wrench className="size-3" />} title={part.name} meta={part.state === 'running' ? 'running' : part.state} open={streaming}>
         {part.args !== undefined && <JsonBlock value={part.args} />}
       </ToolFrame>
     )
@@ -124,7 +163,7 @@ function MessagePartView({ part, streaming, isUser }: { part: MessagePart; strea
 
   if (part.type === 'tool-result') {
     return (
-      <ToolFrame icon={<FileJson className="size-3" />} title={part.name} meta={part.isError ? 'error' : 'result'} tone={part.isError ? 'error' : 'default'}>
+      <ToolFrame icon={<FileJson className="size-3" />} title={part.name} meta={part.isError ? 'error' : 'result'} tone={part.isError ? 'error' : 'default'} open={streaming}>
         {part.text ? <pre className="whitespace-pre-wrap font-sans leading-5">{part.text}</pre> : <JsonBlock value={part.result} />}
       </ToolFrame>
     )
@@ -132,14 +171,14 @@ function MessagePartView({ part, streaming, isUser }: { part: MessagePart; strea
 
   if (part.type === 'log') {
     return (
-      <ToolFrame icon={<Terminal className="size-3" />} title={part.stream} tone={part.stream === 'stderr' ? 'error' : 'default'}>
+      <ToolFrame icon={<Terminal className="size-3" />} title={part.stream} tone={part.stream === 'stderr' ? 'error' : 'default'} open={streaming}>
         <pre className="whitespace-pre-wrap font-sans leading-5">{part.text}</pre>
       </ToolFrame>
     )
   }
 
   return (
-    <ToolFrame icon={<Circle className="size-3" />} title={part.name}>
+    <ToolFrame icon={<Circle className="size-3" />} title={part.name} open={streaming}>
       {part.text && <pre className="whitespace-pre-wrap font-sans leading-5">{part.text}</pre>}
     </ToolFrame>
   )
@@ -204,22 +243,25 @@ function ToolFrame({
   title,
   meta,
   tone = 'default',
+  open,
 }: {
   children?: ReactNode
   icon: ReactNode
   title: string
   meta?: string
   tone?: 'default' | 'error'
+  open?: boolean
 }) {
   return (
-    <div className={cn('rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground', tone === 'error' && 'border-destructive/35 bg-destructive/10 text-foreground')}>
-      <div className="flex min-w-0 items-center gap-1.5 font-medium text-foreground/75">
+    <details className={cn('rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground', tone === 'error' && 'border-destructive/35 bg-destructive/10 text-foreground')} open={open}>
+      <summary className="group flex min-w-0 cursor-pointer select-none items-center gap-1.5 font-medium text-foreground/75 [&::-webkit-details-marker]:hidden">
+        <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
         {icon}
         <span className="truncate">{title}</span>
         {meta && <span className="ml-auto shrink-0 rounded-sm bg-background/70 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">{meta}</span>}
-      </div>
+      </summary>
       {children && <div className="mt-2">{children}</div>}
-    </div>
+    </details>
   )
 }
 

@@ -64,7 +64,7 @@ declare global {
       readIssueLogs: (projectPath: string, issueId: string) => Promise<Array<{ timestamp: string; role?: string; type?: string; content: string; thinking?: string; parts?: unknown[]; stream?: string }>>
       appendIssueLog: (projectPath: string, issueId: string, entry: { role: string; content: string; thinking?: string; parts?: unknown[]; stream?: string }) => Promise<string>
       readChatLogs: (projectPath: string, sessionId: string) => Promise<Array<{ timestamp: string; role: string; content: string; thinking?: string; parts?: unknown[] }>>
-      appendChatLog: (projectPath: string, sessionId: string, msg: { role: string; content: string; thinking?: string; parts?: unknown[] }) => Promise<string>
+      appendChatLog: (projectPath: string, sessionId: string, msg: { role: string; content: string; thinking?: string; parts?: unknown[]; stream?: string }) => Promise<string>
       getEngineSnapshot: () => Promise<{
         sessions: { running: string[] }
         issueRuns: {
@@ -116,12 +116,23 @@ declare global {
         model: string
         thinking: string
         message: string
+        userMessage?: string
         workspacePath: string
         sessionId?: string
       }) => Promise<{ sessionId: string }>
       getAgentStatus: (sessionId: string) => Promise<{ running: boolean }>
       cancelChat: (sessionId: string) => Promise<boolean>
-      onAgentOutput: (callback: (data: { sessionId: string; text: string; stream?: string }) => void) => () => void
+      onAgentOutput: (callback: (data: {
+        sessionId: string
+        text: string
+        stream?: string
+        threadId?: string
+        turnId?: string
+        parts?: unknown[]
+        source?: string
+        agentKind?: string
+        path?: string
+      }) => void) => () => void
       onAgentDone: (callback: (data: { sessionId: string; exitCode: number | null; error?: string }) => void) => () => void
       minimizeWindow: () => Promise<void>
       closeWindow: () => Promise<void>

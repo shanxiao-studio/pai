@@ -2,6 +2,8 @@ import { createHash } from 'crypto'
 import { promises as fs } from 'fs'
 import { basename, join } from 'path'
 import { parse, stringify } from 'smol-toml'
+import { summarizeMessageParts, type StoredMessagePart } from '../../core/chat-message-parts'
+import { findCodexTranscriptPath, findLatestClaudeTranscriptPath, readClaudeTranscriptMessages, readCodexTranscriptMessages, readPiTranscriptMessages, type TranscriptSourceMeta } from '../../core/agent-transcript'
 import {
   AgentSettings,
   ChatSession,
@@ -21,7 +23,7 @@ import {
   WorkspaceSummary,
 } from '../../core/models'
 import { InternalWriteTracker } from './internal-write-tracker'
-import { dotagentsConfigPath, issueSessionId, orchestratorStatePath, paiConfigPath, paiRuntimeDir, sessionDir, threadPath } from './pai-paths'
+import { dotagentsConfigPath, issueSessionId, orchestratorStatePath, paiConfigPath, paiRuntimeDir, sessionDir, threadPath, transcriptSourcePath } from './pai-paths'
 
 export class PaiStore {
   constructor(private readonly writeTracker: InternalWriteTracker) {}
@@ -364,10 +366,9 @@ export class PaiStore {
     const sessionId = issueSessionId(issueId)
     const legacySessionId = `issue-${issueId}`
     const logs = await this.readJsonlLines(join(sessionDir(projectPath, sessionId), 'events.jsonl'))
-    if (legacySessionId === sessionId) return logs
-
     const legacyLogs = await this.readJsonlLines(join(sessionDir(projectPath, legacySessionId), 'events.jsonl'))
-    return [...legacyLogs, ...logs].sort((a, b) => String(a.timestamp ?? '').localeCompare(String(b.timestamp ?? '')))
+    const combined = [...legacyLogs, ...logs].sort((a, b) => String(a.timestamp ?? '').localeCompare(String(b.timestamp ?? '')))
+    return this.hydrateTranscriptHistory(projectPath, sessionId, combined)
   }
 
   async appendIssueLog(projectPath: string, issueId: string, entry: { role: string; content: string; thinking?: string; parts?: unknown[]; stream?: string }): Promise<string> {
@@ -406,10 +407,11 @@ export class PaiStore {
   }
 
   async readChatLogs(projectPath: string, sessionId: string): Promise<JsonRecord[]> {
-    return this.readJsonlLines(join(sessionDir(projectPath, sessionId), 'messages.jsonl'))
+    const logs = await this.readJsonlLines(join(sessionDir(projectPath, sessionId), 'messages.jsonl'))
+    return this.hydrateTranscriptHistory(projectPath, sessionId, logs)
   }
 
-  async appendChatLog(projectPath: string, sessionId: string, msg: { role: string; content: string; thinking?: string; parts?: unknown[] }): Promise<string> {
+  async appendChatLog(projectPath: string, sessionId: string, msg: { role: string; content: string; thinking?: string; parts?: unknown[]; stream?: string }): Promise<string> {
     await this.ensureSession(projectPath, sessionId, {
       threadId: sessionId,
       agent: 'unknown',
@@ -418,6 +420,15 @@ export class PaiStore {
     const line = JSON.stringify({ timestamp: new Date().toISOString(), ...msg }) + '\n'
     await this.appendTextFile(join(sessionDir(projectPath, sessionId), 'messages.jsonl'), line)
     return line
+  }
+
+  async writeTranscriptSource(projectPath: string, sessionId: string, source: TranscriptSourceMeta) {
+    await this.ensureSession(projectPath, sessionId, {
+      threadId: sessionId,
+      agent: source.agentKind ?? 'unknown',
+      kind: sessionId.startsWith('issue-') ? 'issue' : 'chat',
+    })
+    await this.writeTextFile(transcriptSourcePath(projectPath, sessionId), JSON.stringify(source, null, 2))
   }
 
   async readIssueRuntimeState(projectPath: string): Promise<Record<string, IssueRuntimeState>> {
@@ -637,6 +648,44 @@ export class PaiStore {
     }
   }
 
+  private async hydrateTranscriptHistory(projectPath: string, sessionId: string, logs: JsonRecord[]) {
+    const sourceMeta = await this.readTranscriptSource(projectPath, sessionId)
+    const transcriptMessages = await this.readTranscriptBackfill(projectPath, sessionId, sourceMeta)
+    if (transcriptMessages.length === 0) return dedupeTranscriptLogs(logs)
+
+    return dedupeTranscriptLogs(mergeTranscriptDetailsIntoLogs(logs, transcriptMessages))
+  }
+
+  private async readTranscriptSource(projectPath: string, sessionId: string): Promise<TranscriptSourceMeta | null> {
+    const value = await this.readJsonIfExists(transcriptSourcePath(projectPath, sessionId))
+    return value as TranscriptSourceMeta | null
+  }
+
+  private async readTranscriptBackfill(projectPath: string, sessionId: string, sourceMeta: TranscriptSourceMeta | null) {
+    const agentKind = sourceMeta?.agentKind
+    if (agentKind === 'pi') {
+      const piRuntimeDir = join(sessionDir(projectPath, sessionId), 'pi-runtime')
+      return readPiTranscriptMessages(piRuntimeDir)
+    }
+
+    if (agentKind === 'claude') {
+      const claudePath = sourceMeta?.path ?? await findLatestClaudeTranscriptPath(projectPath)
+      if (!claudePath) return []
+      return readClaudeTranscriptMessages(claudePath)
+    }
+
+    if (agentKind === 'codex') {
+      const codexPath = sourceMeta?.path ?? await findCodexTranscriptPath(sourceMeta?.threadId)
+      if (!codexPath) return []
+      return readCodexTranscriptMessages(codexPath, {
+        threadId: sourceMeta?.threadId,
+        turnId: sourceMeta?.turnId,
+      })
+    }
+
+    return []
+  }
+
   private async normalizeExistingPath(path: string) {
     try {
       return await fs.realpath(path)
@@ -683,6 +732,220 @@ export class PaiStore {
     this.writeTracker.mark(path)
     await fs.rm(path, { recursive: true, force: true })
   }
+}
+
+function dedupeTranscriptLogs(logs: JsonRecord[]) {
+  const sorted = [...logs].sort((left, right) => String(left.timestamp ?? '').localeCompare(String(right.timestamp ?? '')))
+  const seen = new Map<string, number>()
+  const result: JsonRecord[] = []
+
+  for (const rawEntry of sorted) {
+    const entry = normalizeTranscriptLog(rawEntry)
+    const role = typeof entry.role === 'string' ? entry.role : typeof entry.type === 'string' ? entry.type : 'assistant'
+    const content = typeof entry.content === 'string' ? entry.content.trim() : ''
+    const structuredText = Array.isArray(entry.parts) ? getStructuredText(entry.parts) : ''
+    const parts = Array.isArray(entry.parts) ? JSON.stringify(entry.parts) : ''
+    const key = `${role}::${content || structuredText || parts}`
+    if (parts || content || structuredText) {
+      let previousIndex = seen.get(key)
+      if (previousIndex === undefined && role === 'assistant' && structuredText) {
+        const matchingAssistantIndex = result.findIndex((candidate) => {
+          if ((candidate.role ?? candidate.type) !== 'assistant') return false
+          const candidateContent = typeof candidate.content === 'string' ? candidate.content.trim() : ''
+          const candidateStructuredText = Array.isArray(candidate.parts) ? getStructuredText(candidate.parts) : ''
+          return (
+            candidateContent.length > 0 && (structuredText.includes(candidateContent) || candidateContent.includes(content))
+          ) || (
+            candidateStructuredText.length > 0 && (structuredText.includes(candidateStructuredText) || candidateStructuredText.includes(structuredText))
+          )
+        })
+        if (matchingAssistantIndex >= 0) previousIndex = matchingAssistantIndex
+      }
+      if (previousIndex !== undefined) {
+        const previous = result[previousIndex]
+        if (isMoreCompleteTranscriptEntry(entry, previous)) {
+          result[previousIndex] = entry
+        }
+        continue
+      }
+      seen.set(key, result.length)
+    }
+    result.push(entry)
+  }
+
+  return result
+}
+
+function mergeTranscriptDetailsIntoLogs(logs: JsonRecord[], transcriptMessages: JsonRecord[]) {
+  if (logs.length === 0) return []
+  const normalizedTranscripts = transcriptMessages.map(normalizeTranscriptLog)
+  const usedTranscriptIndexes = new Set<number>()
+
+  return logs.map((rawEntry) => {
+    const entry = normalizeTranscriptLog(rawEntry)
+    const role = typeof entry.role === 'string' ? entry.role : typeof entry.type === 'string' ? entry.type : 'assistant'
+    if (role !== 'assistant') return entry
+
+    const transcriptIndex = findMatchingTranscript(entry, normalizedTranscripts, usedTranscriptIndexes)
+    if (transcriptIndex < 0) return entry
+
+    usedTranscriptIndexes.add(transcriptIndex)
+    const transcript = normalizedTranscripts[transcriptIndex]
+    return mergeTranscriptEntryDetails(entry, transcript)
+  })
+}
+
+function mergeTranscriptEntryDetails(entry: JsonRecord, transcript: JsonRecord) {
+  if (!isMoreCompleteTranscriptEntry(transcript, entry)) return entry
+  const entryText = typeof entry.content === 'string' ? entry.content : ''
+  const transcriptParts = Array.isArray(transcript.parts) ? transcript.parts : []
+  const focusedTranscriptParts = focusTranscriptPartsForContent(transcriptParts, entryText)
+  const parts = focusedTranscriptParts.length > 0 ? focusedTranscriptParts : transcriptParts
+  const typedParts = parts.filter(isStoredMessagePart)
+  const summary = summarizeMessageParts(typedParts)
+  const thinking = summary.thinking.trim()
+  const hasNonLogPart = parts.some((part) => isRecord(part) && part.type !== 'log')
+
+  return {
+    ...entry,
+    ...(thinking ? { thinking } : {}),
+    parts,
+    ...(hasNonLogPart && entry.stream === 'stderr' ? { stream: undefined } : {}),
+  }
+}
+
+function focusTranscriptPartsForContent(parts: unknown[], content: string) {
+  if (!content) return parts
+  const textIndex = parts.findIndex((part) => isRecord(part) && part.type === 'text' && part.text === content)
+  if (textIndex < 0) return parts
+
+  let start = textIndex
+  while (start > 0) {
+    const previous = parts[start - 1]
+    if (isRecord(previous) && previous.type === 'thinking') {
+      start -= 1
+      continue
+    }
+    break
+  }
+  return parts.slice(start)
+}
+
+function findMatchingTranscript(entry: JsonRecord, transcripts: JsonRecord[], usedIndexes: Set<number>) {
+  const content = typeof entry.content === 'string' ? entry.content.trim() : ''
+  const structuredText = Array.isArray(entry.parts) ? getStructuredText(entry.parts) : ''
+
+  return transcripts.findIndex((candidate, index) => {
+    if (usedIndexes.has(index)) return false
+    if ((candidate.role ?? candidate.type) !== 'assistant') return false
+
+    const candidateContent = typeof candidate.content === 'string' ? candidate.content.trim() : ''
+    const candidateStructuredText = Array.isArray(candidate.parts) ? getStructuredText(candidate.parts) : ''
+
+    if (content && candidateContent && (content.includes(candidateContent) || candidateContent.includes(content))) return true
+    if (structuredText && candidateStructuredText && (structuredText.includes(candidateStructuredText) || candidateStructuredText.includes(structuredText))) return true
+    if (content && candidateStructuredText && candidateStructuredText.includes(content)) return true
+    if (structuredText && candidateContent && structuredText.includes(candidateContent)) return true
+    return false
+  })
+}
+
+function getStructuredText(parts: unknown[]) {
+  return parts
+    .map((part) => isRecord(part) && typeof part.type === 'string' && (part.type === 'text' || part.type === 'tool-result') && typeof part.text === 'string'
+      ? part.text.trim()
+      : '')
+    .filter(Boolean)
+    .join('')
+}
+
+function normalizeTranscriptLog(entry: JsonRecord) {
+  const role = typeof entry.role === 'string' ? entry.role : typeof entry.type === 'string' ? entry.type : 'assistant'
+  if (role !== 'assistant' || !Array.isArray(entry.parts)) return entry
+
+  const parts = collapseRepeatedAssistantParts(entry.parts)
+  const hasNonLogPart = parts.some((part) => isRecord(part) && part.type !== 'log')
+  if (parts.length === entry.parts.length && (!hasNonLogPart || entry.stream !== 'stderr')) return entry
+
+  const typedParts = parts.filter(isStoredMessagePart)
+  const summary = summarizeMessageParts(typedParts)
+  const content = summary.content || summary.plainText || (typeof entry.content === 'string' ? entry.content : '')
+  const thinking = summary.thinking.trim() || (typeof entry.thinking === 'string' ? entry.thinking : '')
+  return {
+    ...entry,
+    content,
+    ...(thinking ? { thinking } : {}),
+    parts,
+    ...(hasNonLogPart && entry.stream === 'stderr' ? { stream: undefined } : {}),
+  }
+}
+
+function collapseRepeatedAssistantParts(parts: unknown[]) {
+  const result: unknown[] = []
+  let index = 0
+  while (index < parts.length) {
+    const overlap = findRepeatedPartOverlap(result, parts, index)
+    if (overlap > 0) {
+      index += overlap
+      continue
+    }
+    result.push(parts[index])
+    index += 1
+  }
+  return result
+}
+
+function findRepeatedPartOverlap(result: unknown[], parts: unknown[], startIndex: number) {
+  const maxSize = Math.min(result.length, parts.length - startIndex)
+  for (let size = maxSize; size > 0; size -= 1) {
+    const resultStart = result.length - size
+    let matched = true
+    for (let offset = 0; offset < size; offset += 1) {
+      if (!isSameStoredPart(result[resultStart + offset], parts[startIndex + offset])) {
+        matched = false
+        break
+      }
+    }
+    if (matched && size >= 2) return size
+  }
+  return 0
+}
+
+function isStoredMessagePart(part: unknown): part is StoredMessagePart {
+  if (!isRecord(part) || typeof part.type !== 'string') return false
+  return ['text', 'thinking', 'tool-call', 'tool-result', 'event', 'log'].includes(part.type)
+}
+
+function isSameStoredPart(left: unknown, right: unknown) {
+  if (!isRecord(left) || !isRecord(right) || left.type !== right.type) return false
+  if (left.type === 'thinking' && right.type === 'thinking') return left.text === right.text
+  if (left.type === 'text' && right.type === 'text') return left.text === right.text
+  if (left.type === 'tool-call' && right.type === 'tool-call') return left.id === right.id && left.name === right.name
+  if (left.type === 'tool-result' && right.type === 'tool-result') {
+    return left.id === right.id && left.name === right.name && (left.text ?? '') === (right.text ?? '')
+  }
+  if (left.type === 'event' && right.type === 'event') return left.name === right.name && (left.text ?? '') === (right.text ?? '')
+  if (left.type === 'log' && right.type === 'log') return left.stream === right.stream && left.text === right.text
+  return false
+}
+
+function isMoreCompleteTranscriptEntry(current: JsonRecord, previous: JsonRecord | undefined) {
+  const previousParts = Array.isArray(previous?.parts) ? previous.parts : []
+  const currentParts = Array.isArray(current.parts) ? current.parts : []
+  if (currentParts.length === 0) return false
+  if (previousParts.length === 0) return true
+
+  const previousThinking = typeof previous?.thinking === 'string' && previous.thinking.trim().length > 0
+    ? true
+    : previousParts.some((part) => isRecord(part) && part.type === 'thinking')
+  const currentThinking = typeof current.thinking === 'string' && current.thinking.trim().length > 0
+    ? true
+    : currentParts.some((part) => isRecord(part) && part.type === 'thinking')
+  if (currentThinking && !previousThinking) return true
+
+  const previousToolParts = previousParts.filter((part) => isRecord(part) && (part.type === 'tool-call' || part.type === 'tool-result')).length
+  const currentToolParts = currentParts.filter((part) => isRecord(part) && (part.type === 'tool-call' || part.type === 'tool-result')).length
+  return currentToolParts > previousToolParts
 }
 
 function normalizePaiConfig(existing: JsonRecord, defaults: { name?: string; repositoryUrl?: string }) {

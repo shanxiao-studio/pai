@@ -83,13 +83,34 @@ contextBridge.exposeInMainWorld('electronAPI', {
     model: string
     thinking: string
     message: string
+    userMessage?: string
     workspacePath: string
     sessionId?: string
   }) => ipcRenderer.invoke('agent:chat', params),
   getAgentStatus: (sessionId: string) => ipcRenderer.invoke('agent:status', sessionId),
   cancelChat: (sessionId: string) => ipcRenderer.invoke('agent:cancel', sessionId),
-  onAgentOutput: (callback: (data: { sessionId: string; text: string; stream?: string }) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, data: { sessionId: string; text: string; stream?: string }) =>
+  onAgentOutput: (callback: (data: {
+    sessionId: string
+    text: string
+    stream?: string
+    threadId?: string
+    turnId?: string
+    parts?: unknown[]
+    source?: string
+    agentKind?: string
+    path?: string
+  }) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: {
+      sessionId: string
+      text: string
+      stream?: string
+      threadId?: string
+      turnId?: string
+      parts?: unknown[]
+      source?: string
+      agentKind?: string
+      path?: string
+    }) =>
       callback(data)
     ipcRenderer.on('agent:output', handler)
     return () => ipcRenderer.removeListener('agent:output', handler)

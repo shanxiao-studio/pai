@@ -1,3 +1,5 @@
+import type { StoredMessagePart } from './chat-message-parts'
+
 export type ThemePreference = 'system' | 'light' | 'dark'
 
 export type AgentKind = 'codex' | 'pi' | 'claude' | string
@@ -93,6 +95,7 @@ export type AgentRunInput = {
   model: string
   thinking: string
   message: string
+  userMessage?: string
   workspacePath: string
   sessionId?: string
   source?: 'chat' | 'issue'
@@ -112,6 +115,10 @@ export type AgentOutputEvent = {
   stream?: 'stderr'
   threadId?: string
   turnId?: string
+  parts?: StoredMessagePart[]
+  source?: string
+  agentKind?: string
+  path?: string
 }
 
 export type AgentDoneEvent = {
