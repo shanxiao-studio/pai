@@ -1,4 +1,4 @@
-import { appendMessageParts, markMessagePartsDone, splitAgentOutput, summarizeMessageParts, type StoredMessagePart } from './chat-message-parts'
+import { appendMessageParts, markMessagePartsDone, splitAgentOutput, summarizeFinalMessageParts, summarizeMessageParts, type StoredMessagePart } from './chat-message-parts'
 import type { AgentOutputEvent } from './models'
 
 export type AssistantMessageAccumulator = {
@@ -51,7 +51,7 @@ export function finalizeAssistantMessage(
 } {
   const parts = state.parts.length > 0 ? markMessagePartsDone(state.parts) : []
   const summary = parts.length > 0
-    ? summarizeMessageParts(parts)
+    ? summarizeFinalMessageParts(parts)
     : {
       content: state.content,
       thinking: state.thinking,

@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import ReactMarkdown from 'react-markdown'
-import { Brain, ChevronRight, Circle, FileJson, Terminal, Wrench } from 'lucide-react'
+import { Activity, Brain, ChevronRight, Circle, FileJson, Terminal, Wrench } from 'lucide-react'
 import remarkGfm from 'remark-gfm'
 import { cn } from '@/lib/utils'
 
@@ -27,6 +27,8 @@ export function MessageBubble({ message, streaming }: { message: ChatMessage; st
   const isUser = message.role === 'user'
   const isError = message.stream === 'stderr'
   const parts = getMessageParts(message, streaming)
+  const textParts = isUser ? parts : parts.filter((part) => part.type === 'text')
+  const processParts = isUser ? [] : parts.filter((part) => part.type !== 'text')
 
   return (
     <div className={cn('flex', isUser && 'justify-end')}>
@@ -36,9 +38,16 @@ export function MessageBubble({ message, streaming }: { message: ChatMessage; st
         streaming && 'border-dashed',
       )}>
         <div className="flex flex-col gap-3">
-          {parts.map((part, index) => (
-            <MessagePartView key={`${part.type}-${index}`} part={part} streaming={streaming} isUser={isUser} />
+          {textParts.map((part, index) => (
+            <MessagePartView key={`${part.type}-${index}`} part={part} isUser={isUser} />
           ))}
+          {processParts.length > 0 && (
+            <ProcessFrame count={processParts.length} open={streaming}>
+              {processParts.map((part, index) => (
+                <MessagePartView key={`${part.type}-${index}`} part={part} isUser={isUser} />
+              ))}
+            </ProcessFrame>
+          )}
         </div>
         {streaming && <span className="ml-0.5 inline-block h-4 w-1 animate-pulse bg-muted-foreground align-middle" />}
       </div>
@@ -104,6 +113,16 @@ export function summarizeMessageParts(parts: MessagePart[]) {
   }
 }
 
+export function summarizeFinalMessageParts(parts: MessagePart[]) {
+  const summary = summarizeMessageParts(parts)
+  const finalText = [...parts].reverse().find((part) => part.type === 'text' && part.text.trim().length > 0)
+  return {
+    ...summary,
+    content: finalText?.text ?? summary.content,
+    plainText: finalText?.text ?? summary.plainText,
+  }
+}
+
 export function splitAgentOutput(text: string, stream?: string) {
   if (stream === 'stderr') {
     return { thinking: '', content: '', parts: [{ type: 'log' as const, stream: 'stderr' as const, text }] }
@@ -135,14 +154,14 @@ export function splitAgentOutput(text: string, stream?: string) {
   }
 }
 
-function MessagePartView({ part, streaming, isUser }: { part: MessagePart; streaming?: boolean; isUser: boolean }) {
+function MessagePartView({ part, isUser }: { part: MessagePart; isUser: boolean }) {
   if (part.type === 'text') {
     return <MarkdownText text={part.text} isUser={isUser} />
   }
 
   if (part.type === 'thinking') {
     return (
-      <details className={cn('rounded-md border px-3 py-2 text-xs', isUser ? 'border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground/85' : 'bg-muted/35 text-muted-foreground')} open={streaming}>
+      <details className={cn('rounded-md border px-3 py-2 text-xs', isUser ? 'border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground/85' : 'bg-muted/35 text-muted-foreground')}>
         <summary className={cn('group flex cursor-pointer select-none items-center gap-1 font-medium [&::-webkit-details-marker]:hidden', isUser ? 'text-primary-foreground/85' : 'text-foreground/75')}>
           <ChevronRight className="size-3 transition-transform group-open:rotate-90" />
           <Brain className="size-3" />
@@ -155,7 +174,7 @@ function MessagePartView({ part, streaming, isUser }: { part: MessagePart; strea
 
   if (part.type === 'tool-call') {
     return (
-      <ToolFrame icon={<Wrench className="size-3" />} title={part.name} meta={part.state === 'running' ? 'running' : part.state} open={streaming}>
+      <ToolFrame icon={<Wrench className="size-3" />} title={part.name} meta={part.state === 'running' ? 'running' : part.state}>
         {part.args !== undefined && <JsonBlock value={part.args} />}
       </ToolFrame>
     )
@@ -163,7 +182,7 @@ function MessagePartView({ part, streaming, isUser }: { part: MessagePart; strea
 
   if (part.type === 'tool-result') {
     return (
-      <ToolFrame icon={<FileJson className="size-3" />} title={part.name} meta={part.isError ? 'error' : 'result'} tone={part.isError ? 'error' : 'default'} open={streaming}>
+      <ToolFrame icon={<FileJson className="size-3" />} title={part.name} meta={part.isError ? 'error' : 'result'} tone={part.isError ? 'error' : 'default'}>
         {part.text ? <pre className="whitespace-pre-wrap font-sans leading-5">{part.text}</pre> : <JsonBlock value={part.result} />}
       </ToolFrame>
     )
@@ -171,14 +190,14 @@ function MessagePartView({ part, streaming, isUser }: { part: MessagePart; strea
 
   if (part.type === 'log') {
     return (
-      <ToolFrame icon={<Terminal className="size-3" />} title={part.stream} tone={part.stream === 'stderr' ? 'error' : 'default'} open={streaming}>
+      <ToolFrame icon={<Terminal className="size-3" />} title={part.stream} tone={part.stream === 'stderr' ? 'error' : 'default'}>
         <pre className="whitespace-pre-wrap font-sans leading-5">{part.text}</pre>
       </ToolFrame>
     )
   }
 
   return (
-    <ToolFrame icon={<Circle className="size-3" />} title={part.name} open={streaming}>
+    <ToolFrame icon={<Circle className="size-3" />} title={part.name}>
       {part.text && <pre className="whitespace-pre-wrap font-sans leading-5">{part.text}</pre>}
     </ToolFrame>
   )
@@ -265,6 +284,22 @@ function ToolFrame({
   )
 }
 
+function ProcessFrame({ children, count, open }: { children: ReactNode; count: number; open?: boolean }) {
+  return (
+    <details className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground" open={open}>
+      <summary className="group flex min-w-0 cursor-pointer select-none items-center gap-1.5 font-medium text-foreground/75 [&::-webkit-details-marker]:hidden">
+        <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
+        <Activity className="size-3" />
+        <span className="truncate">Process</span>
+        <span className="ml-auto shrink-0 rounded-sm bg-background/70 px-1.5 py-0.5 text-[10px] uppercase tracking-[0.08em] text-muted-foreground">{count}</span>
+      </summary>
+      <div className="mt-2 flex flex-col gap-2">
+        {children}
+      </div>
+    </details>
+  )
+}
+
 function JsonBlock({ value }: { value: unknown }) {
   return (
     <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded-md bg-background/70 p-2 font-mono text-[11px] leading-5 text-foreground/80">
@@ -275,13 +310,28 @@ function JsonBlock({ value }: { value: unknown }) {
 
 function getMessageParts(message: ChatMessage, streaming?: boolean): MessagePart[] {
   if (message.parts?.length) {
-    return streaming ? markMessagePartsStreaming(message.parts) : message.parts
+    const parts = streaming ? markMessagePartsStreaming(message.parts) : message.parts
+    return streaming ? parts : focusFinalAssistantText(parts)
   }
 
   const parts: MessagePart[] = []
   if (message.thinking) parts.push({ type: 'thinking', text: message.thinking, state: streaming ? 'streaming' : 'done' })
   if (message.content) parts.push({ type: 'text', text: message.content })
   return parts
+}
+
+function focusFinalAssistantText(parts: MessagePart[]) {
+  const finalTextIndex = findFinalTextIndex(parts)
+  if (finalTextIndex < 0) return parts
+  return parts.filter((part, index) => part.type !== 'text' || index === finalTextIndex)
+}
+
+function findFinalTextIndex(parts: MessagePart[]) {
+  for (let index = parts.length - 1; index >= 0; index -= 1) {
+    const part = parts[index]
+    if (part?.type === 'text' && part.text.trim().length > 0) return index
+  }
+  return -1
 }
 
 function markMessagePartsStreaming(parts: MessagePart[]) {

@@ -26,7 +26,7 @@ describe('agent output aggregation', () => {
 
     const message = finalizeAssistantMessage(state)
 
-    expect(message.content).toBe('firstsecond')
+    expect(message.content).toBe('second')
     expect(message.thinking).toBe('plan')
     expect(message.parts).toEqual([
       { type: 'thinking', text: 'plan', state: 'done' },
@@ -34,6 +34,32 @@ describe('agent output aggregation', () => {
       { type: 'tool-call', id: 'tool-1', name: 'read', state: 'done' },
       { type: 'text', text: 'second' },
     ])
+  })
+
+  it('uses the final text part as the persisted assistant content', () => {
+    let state = createAssistantMessageAccumulator()
+
+    state = appendAgentOutputEvent(state, {
+      sessionId: 'chat-1',
+      text: '',
+      parts: [
+        { type: 'thinking', text: 'plan', state: 'streaming' },
+        { type: 'text', text: 'Let me inspect the project.' },
+        { type: 'tool-call', id: 'tool-1', name: 'read', state: 'running' },
+        { type: 'tool-result', id: 'tool-1', name: 'read', text: 'file contents' },
+        { type: 'text', text: 'Final answer.' },
+      ],
+    })
+
+    const message = finalizeAssistantMessage(state)
+
+    expect(message.content).toBe('Final answer.')
+    expect(message.parts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'thinking', state: 'done' }),
+      expect.objectContaining({ type: 'tool-call', state: 'done' }),
+      expect.objectContaining({ type: 'tool-result', text: 'file contents' }),
+      expect.objectContaining({ type: 'text', text: 'Final answer.' }),
+    ]))
   })
 
   it('keeps stderr as a log part without marking normal assistant output as stderr', () => {

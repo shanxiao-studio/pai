@@ -3,6 +3,7 @@ import {
   markMessagePartsDone,
   normalizeStoredParts,
   splitAgentOutput,
+  summarizeFinalMessageParts,
   summarizeMessageParts,
   type ChatMessage,
   type MessagePart,
@@ -75,7 +76,7 @@ export function finalizeAssistantStream(
   fallbackError?: string,
 ): ChatMessage {
   const parts = state.parts.length > 0 ? markMessagePartsDone(state.parts) : undefined
-  const summary = summarizeMessageParts(parts ?? [])
+  const summary = summarizeFinalMessageParts(parts ?? [])
   const content = (summary.content || summary.plainText || fallbackError || 'No output').trim()
   const thinking = summary.thinking.trim()
 

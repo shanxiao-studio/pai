@@ -89,6 +89,16 @@ export function summarizeMessageParts(parts: StoredMessagePart[]) {
   }
 }
 
+export function summarizeFinalMessageParts(parts: StoredMessagePart[]) {
+  const summary = summarizeMessageParts(parts)
+  const finalText = [...parts].reverse().find((part) => part.type === 'text' && part.text.trim().length > 0)
+  return {
+    ...summary,
+    content: finalText?.text ?? summary.content,
+    plainText: finalText?.text ?? summary.plainText,
+  }
+}
+
 function parseStructuredAgentOutput(text: string) {
   const lines = text.split('\n').filter(Boolean)
   if (lines.length === 0) return null
