@@ -55,8 +55,8 @@ function AgentMessageBubble({ message, streaming }: { message: AgentThreadMessag
     <div className={cn('flex', isUser && 'justify-end')}>
       <div className={cn('max-w-[88%] rounded-lg border px-4 py-3 text-sm leading-6 shadow-sm shadow-black/[0.02]', isUser ? 'bg-muted text-foreground' : isError ? 'border-foreground/30 bg-muted text-foreground' : 'bg-card', streaming && 'border-dashed')}>
         {!isUser && message.thinking && (
-          <details className="mb-3 rounded-md border bg-muted/35 px-3 py-2 text-xs text-muted-foreground" open={streaming}>
-            <summary className="group flex cursor-pointer select-none items-center gap-1 font-medium text-foreground/75 [&::-webkit-details-marker]:hidden">
+          <details className="group mb-3 rounded-md border bg-muted/35 px-3 py-2 text-xs text-muted-foreground" open={streaming}>
+            <summary className="flex cursor-pointer select-none items-center gap-1 font-medium text-foreground/75 [&::-webkit-details-marker]:hidden">
               <ChevronRight className="size-3 transition-transform group-open:rotate-90" />
               Thinking
             </summary>

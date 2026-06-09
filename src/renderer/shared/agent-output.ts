@@ -22,6 +22,7 @@ export type AgentOutputPayload = {
 }
 
 export type AgentLogRecord = {
+  _streaming?: boolean
   timestamp?: string
   role?: string
   type?: string
@@ -121,6 +122,7 @@ export function normalizeLogMessage(entry: AgentLogRecord): ChatMessage {
     thinking: typeof entry.thinking === 'string' ? entry.thinking : undefined,
     parts: normalizeStoredParts(entry.parts),
     stream: entry.stream === 'stderr' ? 'stderr' : undefined,
+    _streaming: entry._streaming === true || undefined,
   }
 }
 

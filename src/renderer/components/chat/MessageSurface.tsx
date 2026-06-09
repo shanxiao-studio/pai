@@ -7,6 +7,7 @@ import { cn } from '@/lib/utils'
 const MARKDOWN_PLUGINS = [remarkGfm]
 
 export interface ChatMessage {
+  _streaming?: boolean
   id: string
   role: 'user' | 'assistant'
   content: string
@@ -26,30 +27,32 @@ export type MessagePart =
 export function MessageBubble({ message, streaming }: { message: ChatMessage; streaming?: boolean }) {
   const isUser = message.role === 'user'
   const isError = message.stream === 'stderr'
-  const parts = getMessageParts(message, streaming)
+  const isStreaming = streaming || message._streaming === true
+  const parts = getMessageParts(message, isStreaming)
   const textParts = isUser ? parts : parts.filter((part) => part.type === 'text')
   const processParts = isUser ? [] : parts.filter((part) => part.type !== 'text')
 
   return (
     <div className={cn('flex', isUser && 'justify-end')}>
       <div className={cn(
-        'content-enter max-w-[88%] rounded-lg border px-4 py-3 text-sm leading-6 shadow-sm shadow-black/[0.025]',
+        'content-enter rounded-lg border px-4 py-3 text-sm leading-6 shadow-sm shadow-black/[0.025]',
         isUser ? 'border-primary/15 bg-primary text-primary-foreground' : isError ? 'border-destructive/35 bg-destructive/10 text-foreground' : 'bg-[hsl(var(--surface-raised))]',
-        streaming && 'border-dashed',
+        isUser ? 'max-w-[88%]' : 'w-full',
+        isStreaming && 'border-dashed',
       )}>
         <div className="flex flex-col gap-3">
           {textParts.map((part, index) => (
             <MessagePartView key={`${part.type}-${index}`} part={part} isUser={isUser} />
           ))}
           {processParts.length > 0 && (
-            <ProcessFrame count={processParts.length} open={streaming}>
+            <ProcessFrame count={processParts.length} open={isStreaming}>
               {processParts.map((part, index) => (
                 <MessagePartView key={`${part.type}-${index}`} part={part} isUser={isUser} />
               ))}
             </ProcessFrame>
           )}
         </div>
-        {streaming && <span className="ml-0.5 inline-block h-4 w-1 animate-pulse bg-muted-foreground align-middle" />}
+        {isStreaming && <span className="ml-0.5 inline-block h-4 w-1 animate-pulse bg-muted-foreground align-middle" />}
       </div>
     </div>
   )
@@ -161,8 +164,8 @@ function MessagePartView({ part, isUser }: { part: MessagePart; isUser: boolean 
 
   if (part.type === 'thinking') {
     return (
-      <details className={cn('rounded-md border px-3 py-2 text-xs', isUser ? 'border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground/85' : 'bg-muted/35 text-muted-foreground')}>
-        <summary className={cn('group flex cursor-pointer select-none items-center gap-1 font-medium [&::-webkit-details-marker]:hidden', isUser ? 'text-primary-foreground/85' : 'text-foreground/75')}>
+      <details className={cn('group rounded-md border px-3 py-2 text-xs', isUser ? 'border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground/85' : 'bg-muted/35 text-muted-foreground')}>
+        <summary className={cn('flex cursor-pointer select-none items-center gap-1 font-medium [&::-webkit-details-marker]:hidden', isUser ? 'text-primary-foreground/85' : 'text-foreground/75')}>
           <ChevronRight className="size-3 transition-transform group-open:rotate-90" />
           <Brain className="size-3" />
           Thinking
@@ -272,8 +275,8 @@ function ToolFrame({
   open?: boolean
 }) {
   return (
-    <details className={cn('rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground', tone === 'error' && 'border-destructive/35 bg-destructive/10 text-foreground')} open={open}>
-      <summary className="group flex min-w-0 cursor-pointer select-none items-center gap-1.5 font-medium text-foreground/75 [&::-webkit-details-marker]:hidden">
+    <details className={cn('group rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground', tone === 'error' && 'border-destructive/35 bg-destructive/10 text-foreground')} open={open}>
+      <summary className="flex min-w-0 cursor-pointer select-none items-center gap-1.5 font-medium text-foreground/75 [&::-webkit-details-marker]:hidden">
         <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
         {icon}
         <span className="truncate">{title}</span>
@@ -286,8 +289,8 @@ function ToolFrame({
 
 function ProcessFrame({ children, count, open }: { children: ReactNode; count: number; open?: boolean }) {
   return (
-    <details className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground" open={open}>
-      <summary className="group flex min-w-0 cursor-pointer select-none items-center gap-1.5 font-medium text-foreground/75 [&::-webkit-details-marker]:hidden">
+    <details className="group rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground" open={open}>
+      <summary className="flex min-w-0 cursor-pointer select-none items-center gap-1.5 font-medium text-foreground/75 [&::-webkit-details-marker]:hidden">
         <ChevronRight className="size-3 shrink-0 transition-transform group-open:rotate-90" />
         <Activity className="size-3" />
         <span className="truncate">Process</span>

@@ -147,3 +147,67 @@ describe('PaiStore issue runtime state', () => {
     expect(reloaded['issue-1']?.attempt).toBe(0)
   })
 })
+
+
+describe('PaiStore streaming message', () => {
+  it('writes streaming message to the sidecar file with _streaming flag', async () => {
+    const projectPath = await createProjectDir()
+    const store = new PaiStore(new InternalWriteTracker())
+
+    await store.writeStreamingMessage(projectPath, 'session-1', {
+      role: 'assistant',
+      content: 'partial answer',
+      thinking: 'reasoning step',
+      parts: [{ type: 'thinking', text: 'reasoning step', state: 'streaming' }],
+    })
+
+    const streamPath = join(projectPath, '.pai', 'sessions', 'session-1', 'messages.jsonl.stream')
+    const raw = await readFile(streamPath, 'utf8')
+    const parsed = JSON.parse(raw.trim())
+    expect(parsed._streaming).toBe(true)
+    expect(parsed.role).toBe('assistant')
+    expect(parsed.content).toBe('partial answer')
+    expect(parsed.thinking).toBe('reasoning step')
+  })
+
+  it('readChatLogs includes streaming message when sidecar file exists', async () => {
+    const projectPath = await createProjectDir()
+    const store = new PaiStore(new InternalWriteTracker())
+
+    // Write a user message to messages.jsonl
+    await store.appendChatLog(projectPath, 'session-1', {
+      role: 'user',
+      content: 'hello',
+      parts: [{ type: 'text', text: 'hello' }],
+    })
+
+    // Write a streaming assistant message to the sidecar
+    await store.writeStreamingMessage(projectPath, 'session-1', {
+      role: 'assistant',
+      content: 'partial answer',
+      thinking: 'reasoning',
+      parts: [{ type: 'thinking', text: 'reasoning', state: 'streaming' }, { type: 'text', text: 'partial answer' }],
+    })
+
+    const logs = await store.readChatLogs(projectPath, 'session-1')
+    const streamMsg = logs.find((log) => log._streaming === true)
+    expect(streamMsg).toBeDefined()
+    expect(streamMsg?.content).toBe('partial answer')
+    expect(streamMsg?.role).toBe('assistant')
+  })
+
+  it('clearStreamingMessage removes the sidecar file', async () => {
+    const projectPath = await createProjectDir()
+    const store = new PaiStore(new InternalWriteTracker())
+
+    await store.writeStreamingMessage(projectPath, 'session-1', {
+      role: 'assistant',
+      content: 'partial',
+    })
+    await store.clearStreamingMessage(projectPath, 'session-1')
+
+    const logs = await store.readChatLogs(projectPath, 'session-1')
+    const streamMsg = logs.find((log) => log._streaming === true)
+    expect(streamMsg).toBeUndefined()
+  })
+})

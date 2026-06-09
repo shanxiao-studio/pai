@@ -406,9 +406,26 @@ export class PaiStore {
     await this.removeDirectory(sessionSource)
   }
 
+  private static STREAM_FILE = 'messages.jsonl.stream'
+
+  async writeStreamingMessage(projectPath: string, sessionId: string, msg: { role: string; content: string; thinking?: string; parts?: unknown[]; stream?: string }): Promise<void> {
+    await this.ensureSession(projectPath, sessionId, { threadId: sessionId, agent: 'unknown', kind: 'chat' })
+    const data = JSON.stringify({ timestamp: new Date().toISOString(), ...msg, _streaming: true }) + '\n'
+    await this.writeTextFile(join(sessionDir(projectPath, sessionId), PaiStore.STREAM_FILE), data)
+  }
+
+  async clearStreamingMessage(projectPath: string, sessionId: string): Promise<void> {
+    const filePath = join(sessionDir(projectPath, sessionId), PaiStore.STREAM_FILE)
+    try { await this.unlinkFile(filePath) }
+    catch { /* file may not exist */ }
+  }
+
   async readChatLogs(projectPath: string, sessionId: string): Promise<JsonRecord[]> {
     const logs = await this.readJsonlLines(join(sessionDir(projectPath, sessionId), 'messages.jsonl'))
-    return this.hydrateTranscriptHistory(projectPath, sessionId, logs)
+    const result = await this.hydrateTranscriptHistory(projectPath, sessionId, logs)
+    const streamMsg = await this.readStreamingMessage(projectPath, sessionId)
+    if (streamMsg) result.push(streamMsg)
+    return result
   }
 
   async appendChatLog(projectPath: string, sessionId: string, msg: { role: string; content: string; thinking?: string; parts?: unknown[]; stream?: string }): Promise<string> {
@@ -420,6 +437,19 @@ export class PaiStore {
     const line = JSON.stringify({ timestamp: new Date().toISOString(), ...msg }) + '\n'
     await this.appendTextFile(join(sessionDir(projectPath, sessionId), 'messages.jsonl'), line)
     return line
+  }
+
+  private async readStreamingMessage(projectPath: string, sessionId: string): Promise<JsonRecord | null> {
+    const streamMsg = await this.readJsonIfExists(join(sessionDir(projectPath, sessionId), PaiStore.STREAM_FILE))
+    if (!streamMsg || typeof streamMsg.role !== 'string' || !streamMsg._streaming) return null
+    return {
+      ...streamMsg,
+      role: 'assistant',
+      stream: typeof streamMsg.stream === 'string' ? streamMsg.stream : 'stderr',
+      content: typeof streamMsg.content === 'string' ? streamMsg.content : '',
+      _streaming: true,
+      _from_stream_file: true,
+    }
   }
 
   async writeTranscriptSource(projectPath: string, sessionId: string, source: TranscriptSourceMeta) {

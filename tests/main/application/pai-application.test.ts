@@ -42,6 +42,8 @@ function createHarness() {
     readChatLogs: vi.fn(async () => [{ role: 'user', content: 'hello' }]),
     appendChatLog: vi.fn(async () => 'chat-log-line'),
     writeTranscriptSource: vi.fn(async () => undefined),
+    writeStreamingMessage: vi.fn(async () => undefined),
+    clearStreamingMessage: vi.fn(async () => undefined),
     findIssueIdForSession: vi.fn(async () => null as string | null),
     updateIssueStatus: vi.fn(async () => undefined),
   }
@@ -332,5 +334,76 @@ describe('PaiApplication chat agents', () => {
       parts: [{ type: 'text', text: 'visible issue reply' }],
     })
     expect(store.appendIssueLog.mock.invocationCallOrder[0]).toBeLessThan(runtime.start.mock.invocationCallOrder[0])
+  })
+})
+
+
+describe('PaiApplication streaming persistence', () => {
+  it('calls writeStreamingMessage during agent output', async () => {
+    const { app, runtime, store } = createHarness()
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+
+    store.writeStreamingMessage = vi.fn(async () => undefined)
+    store.clearStreamingMessage = vi.fn(async () => undefined)
+
+    ;(runtime.start as ReturnType<typeof vi.fn>).mockImplementationOnce(async (_input, hooks) => {
+      hooks?.onOutput?.({
+        sessionId: 'chat-1',
+        text: 'Hello ',
+        parts: [{ type: 'text', text: 'Hello ' }],
+        agentKind: 'codex',
+      })
+      hooks?.onOutput?.({
+        sessionId: 'chat-1',
+        text: 'Hello world',
+        parts: [{ type: 'text', text: 'Hello world' }],
+        agentKind: 'codex',
+      })
+      await vi.advanceTimersByTimeAsync(3000)
+      await hooks?.onDone?.({ sessionId: 'chat-1', exitCode: 0 })
+      return { sessionId: 'chat-1' }
+    })
+
+    await app.startChat({
+      agentKind: 'codex',
+      model: 'gpt-5',
+      thinking: 'medium',
+      message: 'hello',
+      workspacePath: '/project',
+      sessionId: 'chat-1',
+    })
+
+    expect(store.writeStreamingMessage).toHaveBeenCalled()
+    const lastCall = (store.writeStreamingMessage as ReturnType<typeof vi.fn>).mock.calls.slice(-1)[0]
+    expect(lastCall[2]).toMatchObject({ role: 'assistant', content: 'Hello world' })
+    expect(store.clearStreamingMessage).toHaveBeenCalled()
+    vi.useRealTimers()
+  })
+
+  it('does not call writeStreamingMessage for empty output', async () => {
+    const { app, runtime, store } = createHarness()
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+
+    store.writeStreamingMessage = vi.fn(async () => undefined)
+    store.clearStreamingMessage = vi.fn(async () => undefined)
+
+    ;(runtime.start as ReturnType<typeof vi.fn>).mockImplementationOnce(async (_input, hooks) => {
+      await vi.advanceTimersByTimeAsync(3000)
+      await hooks?.onDone?.({ sessionId: 'chat-1', exitCode: 0, error: 'boom' })
+      return { sessionId: 'chat-1' }
+    })
+
+    await app.startChat({
+      agentKind: 'codex',
+      model: 'gpt-5',
+      thinking: 'medium',
+      message: 'run',
+      workspacePath: '/project',
+      sessionId: 'chat-1',
+    })
+
+    expect(store.writeStreamingMessage).not.toHaveBeenCalled()
+    expect(store.clearStreamingMessage).toHaveBeenCalled()
+    vi.useRealTimers()
   })
 })

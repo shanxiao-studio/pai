@@ -198,9 +198,33 @@ export class PaiApplication {
     } = {},
   ) {
     let assistantState = createAssistantMessageAccumulator()
+    let streamDebounceTimer: ReturnType<typeof setTimeout> | null = null
+    let currentSessionId: string | undefined
+
+    const scheduleStreamPersist = () => {
+      if (streamDebounceTimer) clearTimeout(streamDebounceTimer)
+      streamDebounceTimer = setTimeout(async () => {
+        streamDebounceTimer = null
+        try {
+          const msg = finalizeAssistantMessage(assistantState)
+          if (hasAssistantMessageContent(assistantState) && msg.content.trim().length > 0) {
+            await this.store.writeStreamingMessage(input.workspacePath, input.sessionId ?? currentSessionId ?? '', {
+              role: 'assistant',
+              content: msg.content,
+              thinking: msg.thinking,
+              parts: msg.parts as { type: string; text: string }[],
+              stream: msg.stream,
+            })
+          }
+        } catch (error) {
+          console.error('[agent] Failed to persist streaming state:', error)
+        }
+      }, 2000)
+    }
 
     return this.runtime.start(input, {
       onOutput: (event) => {
+        currentSessionId = event.sessionId
         void this.store.writeTranscriptSource(input.workspacePath, event.sessionId, {
           agentKind: input.agentKind,
           threadId: event.threadId,
@@ -209,10 +233,20 @@ export class PaiApplication {
           updatedAt: new Date().toISOString(),
         })
         assistantState = appendAgentOutputEvent(assistantState, event)
+        scheduleStreamPersist()
         hooks.onOutput?.(event)
         this.emitAgentOutput(event)
       },
       onDone: async (event) => {
+        if (streamDebounceTimer) {
+          clearTimeout(streamDebounceTimer)
+          streamDebounceTimer = null
+        }
+        try {
+          await this.store.clearStreamingMessage(input.workspacePath, input.sessionId ?? currentSessionId ?? event.sessionId)
+        } catch (error) {
+          console.error('[agent] Failed to clear streaming state:', error)
+        }
         if (hasAssistantMessageContent(assistantState) || event.error) {
           const message = finalizeAssistantMessage(assistantState, event.error)
           await this.persistAssistantMessage(input.workspacePath, event.sessionId, input.source, message)
