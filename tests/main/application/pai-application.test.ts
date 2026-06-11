@@ -368,6 +368,41 @@ describe('PaiApplication chat agents', () => {
     })
     expect(store.appendIssueLog.mock.invocationCallOrder[0]).toBeLessThan(runtime.start.mock.invocationCallOrder[0])
   })
+
+  it('persists issue user attachments before starting the issue agent', async () => {
+    const { app, runtime, store } = createHarness()
+    ;(store.findIssueIdForSession as ReturnType<typeof vi.fn>).mockResolvedValueOnce('1')
+    const attachment = {
+      type: 'attachment' as const,
+      path: '/tmp/spec.png',
+      name: 'spec.png',
+      size: 2048,
+      mimeType: 'image/png',
+      kind: 'image' as const,
+    }
+
+    await app.startChat({
+      agentKind: 'pi',
+      model: 'default',
+      thinking: 'medium',
+      message: 'internal issue prompt\n\nAttachments:\n- spec.png: /tmp/spec.png (2.0 KB)',
+      userMessage: 'visible issue reply',
+      attachments: [attachment],
+      workspacePath: '/project',
+      sessionId: 'issue-1',
+      source: 'issue',
+    })
+
+    expect(store.appendIssueLog).toHaveBeenCalledWith('/project', '1', {
+      role: 'user',
+      content: 'visible issue reply',
+      parts: [{ type: 'text', text: 'visible issue reply' }, attachment],
+    })
+    expect(runtime.start).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringContaining('/tmp/spec.png'),
+      attachments: [attachment],
+    }), expect.any(Object))
+  })
 })
 
 

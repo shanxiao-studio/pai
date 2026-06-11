@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { MessageBubble, type ChatMessage, type MessagePart } from '@/components/chat/MessageSurface'
+import { AttachmentPreviewImage } from '@/components/chat/AttachmentPreviewImage'
 import { ProjectTabs } from '@/components/project/ProjectTabs'
 import { PromptComposer } from '@/components/project/PromptComposer'
 import { PropertyField, PropertyPanel } from '@/components/project/PropertyPanel'
@@ -14,6 +15,7 @@ import { EditableLabels, PRIORITY_OPTIONS, PriorityPicker, STATUS_OPTIONS, Statu
 import { Issue, IssuePriority, IssueStatus, ProjectConfig } from '@/data/project'
 import { cn } from '@/lib/utils'
 import { electronClient } from '@/shared/api/electron-client'
+import { buildPromptWithAttachments, formatBytes, formatRejectedAttachments } from '@/shared/chat-attachments'
 import {
   consumeAgentOutput,
   countRenderableAssistantMessages,
@@ -657,6 +659,8 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
   const [assistantContent, setAssistantContent] = useState('')
   const [assistantThinking, setAssistantThinking] = useState('')
   const [assistantParts, setAssistantParts] = useState<MessagePart[]>([])
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const [attachmentNotice, setAttachmentNotice] = useState('')
   const [engineSnapshot, setEngineSnapshot] = useState<EngineSnapshot | null>(null)
   const saveTimer = useRef<number | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -851,12 +855,30 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
     navigate(`/project/${nextProject.slug}/issues/${issueId}`)
   }, [issueId, navigate, project?.path, project?.slug])
 
+  const handleAttach = useCallback(async () => {
+    const result = await electronClient?.selectAttachments(attachments)
+    if (!result) return
+    if (result.accepted.length > 0) {
+      setAttachments((current) => [...current, ...result.accepted])
+    }
+    setAttachmentNotice(formatRejectedAttachments(result.rejected))
+  }, [attachments])
+
+  const handleRemoveAttachment = useCallback((path: string) => {
+    setAttachments((current) => current.filter((attachment) => attachment.path !== path))
+    setAttachmentNotice('')
+  }, [])
+
   const handleSubmit = useCallback(async (submittedValue?: string) => {
     const msg = (submittedValue ?? input).trim()
-    if (!msg || running || !project?.path || !issue) return
+    if ((!msg && attachments.length === 0) || running || !project?.path || !issue) return
     const projectPath = project.path
-    const agentPrompt = buildIssuePrompt(issue, logs, msg)
+    const submittedAttachments = attachments
+    const userPrompt = buildPromptWithAttachments(msg, submittedAttachments)
+    const agentPrompt = buildIssuePrompt(issue, logs, userPrompt)
     setInput('')
+    setAttachments([])
+    setAttachmentNotice('')
     setAssistantContent('')
     setAssistantThinking('')
     setAssistantParts([])
@@ -866,7 +888,10 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
       id: String(Date.now()),
       role: 'user',
       content: msg,
-      parts: [{ type: 'text', text: msg }],
+      parts: [
+        ...(msg ? [{ type: 'text' as const, text: msg }] : []),
+        ...submittedAttachments,
+      ],
     }
     setLogs((prev) => [...prev, userMessage])
     const cfg = await electronClient?.readAgentConfig(projectPath)
@@ -915,6 +940,7 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
         thinking,
         message: agentPrompt,
         userMessage: msg,
+        attachments: submittedAttachments,
         workspacePath: projectPath,
         sessionId: runId,
       })
@@ -935,7 +961,7 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
       setAssistantParts([])
       setAgentRunStatus('failed')
     }
-  }, [input, issue, issueId, loadIssueState, logs, project?.path, running])
+  }, [input, attachments, issue, issueId, loadIssueState, logs, project?.path, running])
 
   const handleCancel = useCallback(async () => {
     await electronClient?.cancelChat(issueSessionId(issueId))
@@ -1014,6 +1040,14 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
               onSubmit={handleSubmit}
               disabled={running}
               inputDisabled={running}
+              onAttach={handleAttach}
+              attachments={
+                <IssueAttachmentPreview
+                  attachments={attachments}
+                  notice={attachmentNotice}
+                  onRemove={handleRemoveAttachment}
+                />
+              }
               placeholder={running ? 'Agent is responding...' : `Message agent about "${issue.title}"...`}
               className="pl-[calc(var(--traffic-light-safe-width,0px)+2rem)] pr-8 lg:pl-[calc(var(--traffic-light-safe-width,0px)+2.5rem)] lg:pr-10"
               showTopBorder={false}
@@ -1047,6 +1081,49 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
           </PropertyPanel>
         </aside>
       </div>
+    </div>
+  )
+}
+
+function IssueAttachmentPreview({
+  attachments,
+  notice,
+  onRemove,
+}: {
+  attachments: ChatAttachment[]
+  notice: string
+  onRemove: (path: string) => void
+}) {
+  if (attachments.length === 0 && !notice) return null
+
+  return (
+    <div className="flex flex-col gap-2">
+      {attachments.length > 0 && (
+        <div className="flex max-h-28 flex-wrap gap-2 overflow-y-auto">
+          {attachments.map((attachment) => (
+            <div key={attachment.path} className="group flex max-w-56 items-center gap-2 rounded-md border bg-background/70 p-1.5 text-xs">
+              <AttachmentPreviewImage
+                attachment={attachment}
+                className="size-8 rounded object-cover"
+                fallbackClassName="size-8 rounded bg-muted"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">{attachment.name}</div>
+                <div className="text-[11px] text-muted-foreground">{formatBytes(attachment.size)}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onRemove(attachment.path)}
+                className="pressable rounded p-0.5 text-muted-foreground opacity-70 hover:bg-muted hover:text-foreground group-hover:opacity-100"
+                aria-label={`Remove ${attachment.name}`}
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {notice && <div className="text-xs text-muted-foreground">{notice}</div>}
     </div>
   )
 }
