@@ -1041,6 +1041,7 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
               disabled={running}
               inputDisabled={running}
               onAttach={handleAttach}
+              projectPath={project?.path}
               attachments={
                 <IssueAttachmentPreview
                   attachments={attachments}

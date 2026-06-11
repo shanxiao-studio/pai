@@ -718,6 +718,7 @@ export function ChatView() {
             disabled={running}
             inputDisabled={running}
             onAttach={handleAttach}
+            projectPath={project?.path}
             attachments={
               <AttachmentComposerPreview
                 attachments={attachments}

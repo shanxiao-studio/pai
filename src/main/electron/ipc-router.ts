@@ -4,6 +4,7 @@ import { readFile, stat } from 'fs/promises'
 import { PaiApplication } from '../application/pai-application'
 import { createChatAttachment, filterChatAttachments, MAX_ATTACHMENT_BYTES, type ChatAttachment } from '../core/attachments'
 import { AgentRunInput, DotagentsConfig, ProjectIssue, WorkspaceSettings } from '../core/models'
+import { listSkillSuggestions, searchProjectFiles } from '../core/prompt-suggestions'
 
 export function registerIpcHandlers(pai: PaiApplication) {
   ipcMain.handle('dialog:openFolder', async () => {
@@ -41,6 +42,15 @@ export function registerIpcHandlers(pai: PaiApplication) {
 
     const data = await readFile(filePath)
     return `data:${mimeType};base64,${data.toString('base64')}`
+  })
+
+  ipcMain.handle('prompt:listSkills', async (_event, projectPath: string) => {
+    const config = await pai.readDotagentsConfig(projectPath)
+    return listSkillSuggestions(config.skills)
+  })
+
+  ipcMain.handle('prompt:searchFiles', (_event, projectPath: string, query: string) => {
+    return searchProjectFiles(projectPath, query)
   })
 
   ipcMain.handle('app:getPath', (_event, name: string) => {

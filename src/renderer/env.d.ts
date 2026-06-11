@@ -45,11 +45,20 @@ declare global {
     reason: 'duplicate' | 'too-large' | 'too-many'
   }
 
+  type SkillSuggestion = {
+    name: string
+    source: 'project' | 'global'
+    path?: string
+    description?: string
+  }
+
   interface Window {
     electronAPI?: {
       openFolder: () => Promise<string | null>
       selectAttachments: (existing: ChatAttachment[]) => Promise<{ accepted: ChatAttachment[]; rejected: RejectedAttachment[] }>
       readAttachmentPreview: (path: string) => Promise<string | null>
+      listPromptSkills: (projectPath: string) => Promise<SkillSuggestion[]>
+      searchProjectFiles: (projectPath: string, query: string) => Promise<string[]>
       getPath: (name: string) => Promise<string>
       importProject: () => Promise<ImportedProject | null>
       createWorkspace: (name: string, parentPath: string) => Promise<{ name: string; path: string }>
