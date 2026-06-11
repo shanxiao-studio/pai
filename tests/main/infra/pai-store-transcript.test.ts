@@ -123,6 +123,34 @@ describe('PaiStore transcript hydration', () => {
     })
   })
 
+  it('keeps repeated user messages with identical content', async () => {
+    const projectPath = await createProjectDir()
+    const store = new PaiStore(new InternalWriteTracker())
+    const dir = sessionDir(projectPath, 'default')
+
+    await mkdir(dir, { recursive: true })
+    await writeFile(join(dir, 'messages.jsonl'), [
+      JSON.stringify({
+        timestamp: '2026-06-09T09:45:36.682Z',
+        role: 'user',
+        content: '你好',
+        parts: [{ type: 'text', text: '你好' }],
+      }),
+      JSON.stringify({
+        timestamp: '2026-06-09T09:45:40.809Z',
+        role: 'user',
+        content: '你好',
+        parts: [{ type: 'text', text: '你好' }],
+      }),
+    ].join('\n') + '\n', 'utf8')
+
+    const logs = await store.readChatLogs(projectPath, 'default')
+
+    expect(logs).toHaveLength(2)
+    expect(logs.map((entry) => entry.role)).toEqual(['user', 'user'])
+    expect(logs.map((entry) => entry.content)).toEqual(['你好', '你好'])
+  })
+
   it('hydrates missing assistant thinking from pi transcript history', async () => {
     const projectPath = await createProjectDir()
     const store = new PaiStore(new InternalWriteTracker())

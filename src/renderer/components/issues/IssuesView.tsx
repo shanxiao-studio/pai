@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { ArrowLeft, CheckCircle, Circle, Columns3, Folder, List, LoaderCircle, Plus, Trash2, X } from 'lucide-react'
+import { ArrowLeft, CheckCircle, Circle, Columns3, Folder, List, LoaderCircle, Plus, StopCircle, Trash2, X } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
@@ -937,6 +937,10 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
     }
   }, [input, issue, issueId, loadIssueState, logs, project?.path, running])
 
+  const handleCancel = useCallback(async () => {
+    await electronClient?.cancelChat(issueSessionId(issueId))
+  }, [issueId])
+
   if (!issue) {
     return (
       <div className="flex h-full flex-col bg-background">
@@ -1009,9 +1013,15 @@ function IssueDetailPage({ issueId }: { issueId: string }) {
               onChange={setInput}
               onSubmit={handleSubmit}
               disabled={running}
+              inputDisabled={running}
               placeholder={running ? 'Agent is responding...' : `Message agent about "${issue.title}"...`}
               className="pl-[calc(var(--traffic-light-safe-width,0px)+2rem)] pr-8 lg:pl-[calc(var(--traffic-light-safe-width,0px)+2.5rem)] lg:pr-10"
               showTopBorder={false}
+              controls={running ? (
+                <button onClick={handleCancel} className="pressable flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-foreground hover:bg-muted">
+                  <StopCircle className="size-3.5" /> Stop
+                </button>
+              ) : undefined}
             />
           </div>
         </main>

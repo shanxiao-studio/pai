@@ -772,6 +772,10 @@ function dedupeTranscriptLogs(logs: JsonRecord[]) {
   for (const rawEntry of sorted) {
     const entry = normalizeTranscriptLog(rawEntry)
     const role = typeof entry.role === 'string' ? entry.role : typeof entry.type === 'string' ? entry.type : 'assistant'
+    if (role !== 'assistant') {
+      result.push(entry)
+      continue
+    }
     const content = typeof entry.content === 'string' ? entry.content.trim() : ''
     const structuredText = Array.isArray(entry.parts) ? getStructuredText(entry.parts) : ''
     const parts = Array.isArray(entry.parts) ? JSON.stringify(entry.parts) : ''

@@ -17,6 +17,8 @@ import {
   hasAssistantStreamContent,
   normalizeLogMessages,
   type AgentOutputPayload,
+  type PendingAssistantRun,
+  shouldKeepWaitingForAssistantMessage,
 } from '@/shared/agent-output'
 
 interface Session {
@@ -138,6 +140,7 @@ export function ChatView() {
   const outputCleanup = useRef<(() => void) | null>(null)
   const doneCleanup = useRef<(() => void) | null>(null)
   const logLoadSeq = useRef<Map<string, number>>(new Map())
+  const pendingRunRef = useRef<{ sessionId: string; state: PendingAssistantRun } | null>(null)
   const sidebarDragging = useRef(false)
   const shouldStickToBottom = useRef(true)
   const { name } = useParams()
@@ -146,7 +149,6 @@ export function ChatView() {
 
   const activeMessages = messagesBySession.get(activeSessionId) ?? []
   const activeSessions = sessions.filter((session) => !session.archived)
-  const archivedSessions = sessions.filter((session) => session.archived)
 
   const updateStickToBottom = useCallback(() => {
     const viewport = scrollViewportRef.current
@@ -348,12 +350,19 @@ export function ChatView() {
     let cancelled = false
 
     async function refreshRunningSession() {
-      const [status] = await Promise.all([
+      const [status, loadedMessages] = await Promise.all([
         electronClient?.getAgentStatus(sessionId),
         loadSessionMessages(projectPath, sessionId),
       ])
       if (cancelled) return
       if (status && !status.running) {
+        if (
+          pendingRunRef.current?.sessionId === sessionId &&
+          shouldKeepWaitingForAssistantMessage(loadedMessages, pendingRunRef.current.state)
+        ) {
+          return
+        }
+        pendingRunRef.current = null
         setAssistantContent('')
         setAssistantThinking('')
         setAssistantParts([])
@@ -436,6 +445,13 @@ export function ChatView() {
     setAssistantParts([])
     setRunning(true)
     setRunSessionId(expectedSessionId)
+    pendingRunRef.current = {
+      sessionId: expectedSessionId,
+      state: {
+        assistantMessagesBeforeRun,
+        startedAt: Date.now(),
+      },
+    }
     shouldStickToBottom.current = true
 
     const userMsg: ChatMessage = { id: String(Date.now()), role: 'user', content: prompt, parts: [{ type: 'text', text: prompt }] }
@@ -489,6 +505,7 @@ export function ChatView() {
         setAssistantContent('')
         setAssistantThinking('')
         setAssistantParts([])
+        pendingRunRef.current = null
         setRunning(false)
         setRunSessionId(null)
         outputCleanup.current?.()
@@ -528,6 +545,7 @@ export function ChatView() {
       setAssistantContent('')
       setAssistantThinking('')
       setAssistantParts([])
+      pendingRunRef.current = null
       setRunning(false)
       setRunSessionId(null)
       outputCleanup.current?.()
@@ -667,6 +685,7 @@ export function ChatView() {
           <PromptComposer
             value={input} onChange={setInput} onSubmit={handleSubmit}
             disabled={running}
+            inputDisabled={running}
             showTopBorder={false}
             placeholder={running ? `${agentLabel} is responding...` : `Message ${agentLabel}...`}
             className="pl-[calc(var(--traffic-light-safe-width,0px)+2rem)] pr-8 lg:pl-[calc(var(--traffic-light-safe-width,0px)+2.5rem)] lg:pr-10"
@@ -727,25 +746,6 @@ export function ChatView() {
                 onArchive={handleArchiveSession}
                 onSelect={setActiveSessionId}
               />
-              {archivedSessions.length > 0 && (
-                <>
-                  <div className="px-2 pb-1 pt-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Archived</div>
-                  <SessionGroup
-                    sessions={archivedSessions}
-                    activeSessionId={activeSessionId}
-                    running={running}
-                    renamingSessionId={renamingSessionId}
-                    renameValue={renameValue}
-                    archived
-                    onRenameValueChange={setRenameValue}
-                    onRenameStart={handleRenameStart}
-                    onRenameCommit={handleRenameCommit}
-                    onRenameCancel={handleRenameCancel}
-                    onArchive={handleArchiveSession}
-                    onSelect={setActiveSessionId}
-                  />
-                </>
-              )}
             </div>
           </ScrollArea>
         </aside>
@@ -898,12 +898,13 @@ function SessionGroup({
         const isRenaming = renamingSessionId === session.id
 
         return (
-          <div key={session.id} className="group flex items-center gap-1">
+          <div key={session.id} className="group relative">
             <button
               onClick={() => onSelect(session.id)}
               onDoubleClick={() => onRenameStart(session)}
               className={cn(
-                'pressable flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs',
+                'pressable flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs',
+                !isRenaming && !isDefault && 'pr-12',
                 session.id === activeSessionId ? 'bg-background font-medium shadow-sm ring-1 ring-border/70' : 'hover:bg-background/70',
                 archived && 'text-muted-foreground',
               )}
@@ -931,7 +932,7 @@ function SessionGroup({
             </button>
 
             {!isDefault && !isRenaming && (
-              <div className="flex shrink-0 items-center opacity-0 transition-opacity group-hover:opacity-100">
+              <div className="absolute right-1 top-1/2 flex -translate-y-1/2 items-center opacity-0 transition-opacity group-hover:opacity-100">
                 <button
                   onClick={() => onRenameStart(session)}
                   className="pressable rounded p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
@@ -954,7 +955,7 @@ function SessionGroup({
             {!isDefault && isRenaming && (
               <button
                 onClick={onRenameCommit}
-                className="pressable shrink-0 rounded p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
+                className="pressable absolute right-1 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:bg-background hover:text-foreground"
                 aria-label="Confirm rename"
               >
                 <Check className="size-3" />

@@ -39,6 +39,12 @@ export type AssistantStreamState = {
   stream?: 'stderr'
 }
 
+export type PendingAssistantRun = {
+  assistantMessagesBeforeRun: number
+  startedAt: number
+  graceMs?: number
+}
+
 export function createAssistantStreamState(): AssistantStreamState {
   return {
     content: '',
@@ -112,6 +118,16 @@ export function countRenderableAssistantMessages(messages: ChatMessage[]) {
       (message.parts?.length ?? 0) > 0
     )
   )).length
+}
+
+export function shouldKeepWaitingForAssistantMessage(
+  messages: ChatMessage[] | null | undefined,
+  pendingRun: PendingAssistantRun | null | undefined,
+  now = Date.now(),
+) {
+  if (!pendingRun) return false
+  if (countRenderableAssistantMessages(messages ?? []) > pendingRun.assistantMessagesBeforeRun) return false
+  return now - pendingRun.startedAt < (pendingRun.graceMs ?? 5000)
 }
 
 export function normalizeLogMessage(entry: AgentLogRecord): ChatMessage {

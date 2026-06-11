@@ -3,6 +3,15 @@ import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
 import { cn } from '@/lib/utils'
 
+type PromptComposerKeyDownEvent = {
+  key: string
+  shiftKey: boolean
+  nativeEvent: {
+    isComposing?: boolean
+    keyCode?: number
+  }
+}
+
 interface PromptComposerProps {
   value: string
   onChange: (value: string) => void
@@ -13,6 +22,11 @@ interface PromptComposerProps {
   controls?: React.ReactNode
   className?: string
   showTopBorder?: boolean
+}
+
+export function shouldSubmitPromptOnKeyDown(event: PromptComposerKeyDownEvent) {
+  const isImeComposing = event.nativeEvent.isComposing === true || event.nativeEvent.keyCode === 229
+  return event.key === 'Enter' && !event.shiftKey && !isImeComposing
 }
 
 export function PromptComposer({
@@ -38,7 +52,7 @@ export function PromptComposer({
             value={value}
             onChange={(event) => onChange(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
+              if (shouldSubmitPromptOnKeyDown(event)) {
                 event.preventDefault()
                 submitCurrentValue(event.currentTarget.value)
               }

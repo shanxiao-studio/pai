@@ -41,9 +41,6 @@ export function MessageBubble({ message, streaming }: { message: ChatMessage; st
         isStreaming && 'border-dashed',
       )}>
         <div className="flex flex-col gap-3">
-          {textParts.map((part, index) => (
-            <MessagePartView key={`${part.type}-${index}`} part={part} isUser={isUser} />
-          ))}
           {processParts.length > 0 && (
             <ProcessFrame count={processParts.length} open={isStreaming}>
               {processParts.map((part, index) => (
@@ -51,6 +48,9 @@ export function MessageBubble({ message, streaming }: { message: ChatMessage; st
               ))}
             </ProcessFrame>
           )}
+          {textParts.map((part, index) => (
+            <MessagePartView key={`${part.type}-${index}`} part={part} isUser={isUser} />
+          ))}
         </div>
         {isStreaming && <span className="ml-0.5 inline-block h-4 w-1 animate-pulse bg-muted-foreground align-middle" />}
       </div>
