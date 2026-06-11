@@ -1,6 +1,5 @@
-import { createHash } from 'crypto'
 import { promises as fs } from 'fs'
-import { basename, join } from 'path'
+import { basename, dirname, join } from 'path'
 import { parse, stringify } from 'smol-toml'
 import { summarizeMessageParts, type StoredMessagePart } from '../../core/chat-message-parts'
 import { findCodexTranscriptPath, findLatestClaudeTranscriptPath, readClaudeTranscriptMessages, readCodexTranscriptMessages, readPiTranscriptMessages, type TranscriptSourceMeta } from '../../core/agent-transcript'
@@ -23,7 +22,27 @@ import {
   WorkspaceSummary,
 } from '../../core/models'
 import { InternalWriteTracker } from './internal-write-tracker'
-import { dotagentsConfigPath, issueSessionId, orchestratorStatePath, paiConfigPath, paiRuntimeDir, sessionDir, threadPath, transcriptSourcePath } from './pai-paths'
+import {
+  dotagentsConfigPath,
+  globalConfigPath,
+  issueSessionId,
+  orchestratorStatePath,
+  paiConfigPath,
+  paiDataRoot,
+  paiRuntimeDir,
+  projectAgentsMdPath,
+  projectDir,
+  projectId,
+  sessionDir,
+  sessionsDir,
+  stableId,
+  threadPath,
+  threadsDir,
+  transcriptSourcePath,
+  workspaceConfigPath,
+  workspaceDir,
+  workspaceId,
+} from './pai-paths'
 
 export class PaiStore {
   constructor(private readonly writeTracker: InternalWriteTracker) {}
@@ -35,25 +54,19 @@ export class PaiStore {
     const workspacePath = join(parentPath, trimmedName)
     await fs.mkdir(workspacePath, { recursive: true })
 
-    const existing = (await this.readPaiToml(workspacePath)) ?? {}
+    const existing = (await this.readWorkspaceToml(workspacePath)) ?? {}
     const merged = {
       ...existing,
       name: typeof existing.name === 'string' ? existing.name : trimmedName,
       projects: Array.isArray(existing.projects) ? existing.projects : [],
     }
-    await this.writePaiToml(workspacePath, merged)
-
-    try {
-      await fs.access(join(workspacePath, 'AGENTS.md'))
-    } catch {
-      await this.writeTextFile(join(workspacePath, 'AGENTS.md'), '')
-    }
+    await this.writeWorkspaceToml(workspacePath, merged)
 
     return { name: String(merged.name), path: workspacePath }
   }
 
   async readWorkspaceProjects(workspacePath: string): Promise<ImportedProject[]> {
-    const config = await this.readPaiToml(workspacePath)
+    const config = await this.readWorkspaceToml(workspacePath)
     const rawProjects = readProjectRefs(config?.projects)
     const paths: string[] = []
     const seen = new Set<string>()
@@ -67,7 +80,7 @@ export class PaiStore {
 
     if (config && rawProjects.length !== paths.length) {
       config.projects = paths.map((path) => ({ path }))
-      await this.writePaiToml(workspacePath, config)
+      await this.writeWorkspaceToml(workspacePath, config)
     }
 
     const projects: ImportedProject[] = []
@@ -85,7 +98,7 @@ export class PaiStore {
   }
 
   async addProjectToWorkspace(workspacePath: string, projectPath: string): Promise<ImportedProject> {
-    const config = (await this.readPaiToml(workspacePath)) ?? { projects: [] }
+    const config = (await this.readWorkspaceToml(workspacePath)) ?? { projects: [] }
     const projects = readProjectRefs(config.projects)
     const normalizedProjectPath = await this.normalizeExistingPath(projectPath) ?? projectPath
     const existingPaths = await Promise.all(projects.map(async (p) => await this.normalizeExistingPath(p.path) ?? p.path))
@@ -93,13 +106,14 @@ export class PaiStore {
     if (!exists) {
       projects.push({ path: normalizedProjectPath })
       config.projects = projects
-      await this.writePaiToml(workspacePath, config)
+      await this.writeWorkspaceToml(workspacePath, config)
     }
+    await this.registerProjectWorkspace(workspacePath, normalizedProjectPath)
     return this.inspectProjectFolder(normalizedProjectPath)
   }
 
   async removeProjectFromWorkspace(workspacePath: string, projectPath: string): Promise<void> {
-    const config = await this.readPaiToml(workspacePath)
+    const config = await this.readWorkspaceToml(workspacePath)
     if (!config?.projects) return
 
     const normalizedProjectPath = await this.normalizeExistingPath(projectPath) ?? projectPath
@@ -111,23 +125,22 @@ export class PaiStore {
     }
 
     config.projects = keptProjects
-    await this.writePaiToml(workspacePath, config)
+    await this.writeWorkspaceToml(workspacePath, config)
   }
 
   async readWorkspaceSettings(workspacePath: string): Promise<WorkspaceSettings> {
-    const config = (await this.readPaiToml(workspacePath)) ?? {}
-    const agentsMd = await this.readTextIfExists(join(workspacePath, 'AGENTS.md')) ?? ''
+    const config = (await this.readWorkspaceToml(workspacePath)) ?? {}
     return {
       name: typeof config.name === 'string' ? config.name : basename(workspacePath),
       description: typeof config.description === 'string' ? config.description : '',
-      agentsMd,
+      agentsMd: '',
       theme: isTheme(config.theme) ? config.theme : 'system',
       timezone: typeof config.timezone === 'string' ? config.timezone : Intl.DateTimeFormat().resolvedOptions().timeZone,
     }
   }
 
   async writeWorkspaceSettings(workspacePath: string, settings: WorkspaceSettings): Promise<WorkspaceSettings> {
-    const existing = (await this.readPaiToml(workspacePath)) ?? {}
+    const existing = (await this.readWorkspaceToml(workspacePath)) ?? {}
     const merged = {
       ...existing,
       name: settings.name,
@@ -136,12 +149,11 @@ export class PaiStore {
       timezone: settings.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
     }
 
-    await this.writePaiToml(workspacePath, merged)
-    await this.writeTextFile(join(workspacePath, 'AGENTS.md'), settings.agentsMd)
+    await this.writeWorkspaceToml(workspacePath, merged)
     return {
       name: String(merged.name),
       description: String(merged.description),
-      agentsMd: settings.agentsMd,
+      agentsMd: '',
       theme: merged.theme as ThemePreference,
       timezone: String(merged.timezone),
     }
@@ -160,8 +172,7 @@ export class PaiStore {
     const configLabels = Array.isArray(paiConfig.labels)
       ? paiConfig.labels.filter((label): label is string => typeof label === 'string')
       : labels
-    const agentsFile = typeof paiConfig.agents_file === 'string' ? paiConfig.agents_file : 'AGENTS.md'
-    const agentsMd = await this.readTextIfExists(join(folderPath, agentsFile))
+    const agentsMd = await this.readTextIfExists(projectAgentsMdPath(folderPath))
     const repository = isRecord(paiConfig.repository) ? paiConfig.repository : {}
     const repositoryUrl = typeof repository.url === 'string' ? repository.url : gitOriginUrl
 
@@ -248,7 +259,6 @@ export class PaiStore {
   ) {
     const existing = await this.ensurePaiLayout(projectPath)
     const repository = isRecord(existing.repository) ? existing.repository : {}
-    const agentsFile = typeof existing.agents_file === 'string' ? existing.agents_file : 'AGENTS.md'
     const merged = {
       ...existing,
       name: overview.name,
@@ -262,7 +272,7 @@ export class PaiStore {
     }
 
     await this.writePaiConfig(projectPath, merged)
-    await this.writeTextFile(join(projectPath, agentsFile), overview.agentsMd)
+    await this.writeTextFile(projectAgentsMdPath(projectPath), overview.agentsMd)
     return overview
   }
 
@@ -284,7 +294,7 @@ export class PaiStore {
     }, true)
 
     await this.ensurePaiDataDirs(projectPath)
-    await fs.mkdir(join(projectPath, '.agents', 'skills'), { recursive: true })
+    await fs.mkdir(join(projectDir(projectPath), '.agents', 'skills'), { recursive: true })
     await this.writeTextFile(dotagentsConfigPath(projectPath), stringify(prepareDotagentsForWrite(normalized)))
     return normalized
   }
@@ -395,8 +405,7 @@ export class PaiStore {
     const sessionSource = sessionDir(fromProjectPath, sessionId)
     const sessionTarget = sessionDir(toProjectPath, sessionId)
 
-    await fs.mkdir(join(toProjectPath, '.pai', 'threads'), { recursive: true })
-    await fs.mkdir(join(toProjectPath, '.pai', 'sessions'), { recursive: true })
+    await this.ensurePaiDataDirs(toProjectPath)
 
     this.writeTracker.mark(threadTarget)
     await fs.copyFile(threadSource, threadTarget)
@@ -485,18 +494,42 @@ export class PaiStore {
     await this.writeTextFile(orchestratorStatePath(projectPath), JSON.stringify(runtimeState, null, 2))
   }
 
-  private async readPaiToml(folderPath: string): Promise<JsonRecord | null> {
+  private async readWorkspaceToml(workspacePath: string): Promise<JsonRecord | null> {
     try {
-      const raw = await fs.readFile(paiConfigPath(folderPath), 'utf8')
+      const raw = await fs.readFile(workspaceConfigPath(workspacePath), 'utf8')
       return parse(raw) as JsonRecord
     } catch {
       return null
     }
   }
 
-  private async writePaiToml(folderPath: string, config: JsonRecord) {
-    await this.ensurePaiDataDirs(folderPath)
-    await this.writeTextFile(paiConfigPath(folderPath), stringify(config))
+  private async writeWorkspaceToml(workspacePath: string, config: JsonRecord) {
+    await fs.mkdir(workspaceDir(workspacePath), { recursive: true })
+    await this.writeTextFile(workspaceConfigPath(workspacePath), stringify(config))
+  }
+
+  private async registerProjectWorkspace(workspacePath: string, projectPath: string) {
+    const existing = await this.readGlobalConfig()
+    const projectWorkspaces = isRecord(existing.project_workspaces) ? existing.project_workspaces : {}
+    const merged = {
+      ...existing,
+      project_workspaces: {
+        ...projectWorkspaces,
+        [projectId(projectPath)]: workspaceId(workspacePath),
+      },
+    }
+    await fs.mkdir(paiDataRoot(), { recursive: true })
+    await this.writeTextFile(globalConfigPath(), stringify(merged))
+  }
+
+  private async readGlobalConfig(): Promise<JsonRecord> {
+    try {
+      const raw = await fs.readFile(globalConfigPath(), 'utf8')
+      const parsed = parse(raw)
+      return isRecord(parsed) ? parsed : {}
+    } catch {
+      return {}
+    }
   }
 
   private async readDotagentsRaw(projectPath: string) {
@@ -535,23 +568,22 @@ export class PaiStore {
     await this.writeTextFile(paiConfigPath(projectPath), stringify(config))
   }
 
-  private async ensurePaiDataDirs(folderPath: string) {
-    const paiDir = join(folderPath, '.pai')
-    await fs.mkdir(join(paiDir, 'threads'), { recursive: true })
-    await fs.mkdir(join(paiDir, 'sessions'), { recursive: true })
-    await fs.mkdir(join(paiDir, 'runtime'), { recursive: true })
+  private async ensurePaiDataDirs(projectPath: string) {
+    await fs.mkdir(threadsDir(projectPath), { recursive: true })
+    await fs.mkdir(sessionsDir(projectPath), { recursive: true })
+    await fs.mkdir(paiRuntimeDir(projectPath), { recursive: true })
   }
 
   private async readThreads(projectPath: string, type: 'chat' | 'issue') {
     await this.ensurePaiLayout(projectPath)
-    const threadsDir = join(projectPath, '.pai', 'threads')
-    const entries = await fs.readdir(threadsDir, { withFileTypes: true })
+    const dir = threadsDir(projectPath)
+    const entries = await fs.readdir(dir, { withFileTypes: true })
     const threads = await Promise.all(
       entries
         .filter((entry) => entry.isFile() && entry.name.endsWith('.toml'))
         .map(async (entry) => {
           try {
-            const raw = await fs.readFile(join(threadsDir, entry.name), 'utf8')
+            const raw = await fs.readFile(join(dir, entry.name), 'utf8')
             return parse(raw) as JsonRecord
           } catch {
             return null
@@ -727,11 +759,13 @@ export class PaiStore {
 
   private async writeTextFile(path: string, data: string) {
     this.writeTracker.mark(path)
+    await fs.mkdir(dirname(path), { recursive: true })
     await fs.writeFile(path, data, 'utf8')
   }
 
   private async appendTextFile(path: string, data: string) {
     this.writeTracker.mark(path)
+    await fs.mkdir(dirname(path), { recursive: true })
     await fs.appendFile(path, data, 'utf8')
   }
 
@@ -1211,7 +1245,7 @@ function parseOriginUrl(gitConfig: string) {
 
 function projectSlug(projectPath: string, folderName: string) {
   const prefix = slugify(folderName)
-  const hash = createHash('sha1').update(projectPath).digest('hex').slice(0, 10)
+  const hash = stableId(projectPath).slice(0, 10)
   return `${prefix}-${hash}`
 }
 

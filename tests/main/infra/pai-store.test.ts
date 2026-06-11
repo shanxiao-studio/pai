@@ -1,10 +1,10 @@
-import { mkdtemp, readFile, rm } from 'fs/promises'
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { PaiStore } from '../../../src/main/infra/fs/pai-store'
 import { InternalWriteTracker } from '../../../src/main/infra/fs/internal-write-tracker'
-import { orchestratorStatePath, paiConfigPath } from '../../../src/main/infra/fs/pai-paths'
+import { globalConfigPath, orchestratorStatePath, paiConfigPath, sessionDir, workspaceConfigPath } from '../../../src/main/infra/fs/pai-paths'
 
 const tempDirs: string[] = []
 
@@ -19,6 +19,34 @@ afterEach(async () => {
 })
 
 describe('PaiStore orchestrator config', () => {
+  it('stores workspace and project config under the Pai data root', async () => {
+    const root = await createProjectDir()
+    const workspacePath = join(root, 'workspace')
+    const projectPath = join(root, 'project')
+    const store = new PaiStore(new InternalWriteTracker())
+
+    await store.createWorkspace('workspace', root)
+    await mkdir(projectPath)
+    await writeFile(join(projectPath, 'package.json'), '{"name":"project"}')
+    await store.addProjectToWorkspace(workspacePath, projectPath)
+    await store.writeOverviewConfig(projectPath, {
+      name: 'Project',
+      description: '',
+      status: 'todo',
+      githubLink: '',
+      labels: [],
+      agentsMd: '# Project agents',
+    })
+
+    await expect(access(workspaceConfigPath(workspacePath))).resolves.toBeUndefined()
+    await expect(access(paiConfigPath(projectPath))).resolves.toBeUndefined()
+    await expect(access(globalConfigPath())).resolves.toBeUndefined()
+    await expect(access(join(workspacePath, '.pai'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(join(workspacePath, 'AGENTS.md'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(access(join(projectPath, '.pai'))).rejects.toMatchObject({ code: 'ENOENT' })
+    await expect(readFile(join(projectPath, 'AGENTS.md'), 'utf8')).resolves.toBe('# Project agents')
+  })
+
   it('writes default issue orchestrator and codex app-server config into pai.toml', async () => {
     const projectPath = await createProjectDir()
     const store = new PaiStore(new InternalWriteTracker())
@@ -161,7 +189,7 @@ describe('PaiStore streaming message', () => {
       parts: [{ type: 'thinking', text: 'reasoning step', state: 'streaming' }],
     })
 
-    const streamPath = join(projectPath, '.pai', 'sessions', 'session-1', 'messages.jsonl.stream')
+    const streamPath = join(sessionDir(projectPath, 'session-1'), 'messages.jsonl.stream')
     const raw = await readFile(streamPath, 'utf8')
     const parsed = JSON.parse(raw.trim())
     expect(parsed._streaming).toBe(true)

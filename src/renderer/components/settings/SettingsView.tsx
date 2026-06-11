@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Clock, FileText, Monitor, Moon, Settings, Sun } from 'lucide-react'
+import { Clock, Monitor, Moon, Settings, Sun } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
@@ -57,7 +57,7 @@ export function SettingsView() {
     setSettings({
       name: loadedSettings.name || activeWorkspace.name,
       description: loadedSettings.description ?? '',
-      agentsMd: loadedSettings.agentsMd ?? '',
+      agentsMd: '',
       theme: loadedSettings.theme ?? 'system',
       timezone: loadedSettings.timezone || DEFAULT_TIMEZONE,
     })
@@ -118,7 +118,6 @@ export function SettingsView() {
         <aside className="hidden w-56 shrink-0 border-r bg-muted/30 p-4 lg:block">
           <nav className="flex flex-col gap-1">
             <SettingsLink icon={Settings} label="Workspace" active />
-            <SettingsLink icon={FileText} label="AGENTS.md" />
             <SettingsLink icon={Monitor} label="Appearance" />
             <SettingsLink icon={Clock} label="Time" />
           </nav>
@@ -140,15 +139,6 @@ export function SettingsView() {
                   className="min-h-[96px] resize-none text-sm leading-6"
                 />
               </label>
-            </section>
-
-            <section className="grid gap-5 border-b py-8">
-              <Textarea
-                value={settings.agentsMd}
-                onChange={(event) => patchSettings({ agentsMd: event.target.value })}
-                placeholder="Workspace-level agent instructions..."
-                className="min-h-[240px] resize-y font-mono text-xs leading-6"
-              />
             </section>
 
             <section className="grid gap-5 border-b py-8">

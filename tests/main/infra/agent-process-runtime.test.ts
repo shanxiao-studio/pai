@@ -34,9 +34,9 @@ describe('AgentProcessRuntime transcript replay', () => {
     await mkdir(piRuntimeDir, { recursive: true })
     await writeFile(binPath, [
       '#!/bin/sh',
-      'printf "%s\\n" \'{"type":"message","timestamp":"2099-01-01T00:00:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"first"}]}}\' > "$PWD/.pai/sessions/default/pi-runtime/run.jsonl"',
+      `printf "%s\\n" '{"type":"message","timestamp":"2099-01-01T00:00:00.000Z","message":{"role":"assistant","content":[{"type":"text","text":"first"}]}}' > ${JSON.stringify(transcriptPath)}`,
       'sleep 1',
-      'printf "%s\\n" \'{"type":"message","timestamp":"2099-01-01T00:00:01.000Z","message":{"role":"toolResult","toolCallId":"tool-1","toolName":"read","content":[{"type":"text","text":"tool output"}]}}\' >> "$PWD/.pai/sessions/default/pi-runtime/run.jsonl"',
+      `printf "%s\\n" '{"type":"message","timestamp":"2099-01-01T00:00:01.000Z","message":{"role":"toolResult","toolCallId":"tool-1","toolName":"read","content":[{"type":"text","text":"tool output"}]}}' >> ${JSON.stringify(transcriptPath)}`,
     ].join('\n'), 'utf8')
     await chmod(binPath, 0o755)
     await writeFile(transcriptPath, '', 'utf8')

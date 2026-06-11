@@ -3,6 +3,7 @@ import { FSWatcher, watch } from 'fs'
 import { join, resolve } from 'path'
 import { AppEventBus } from '../../core/app-event-bus'
 import { InternalWriteTracker } from './internal-write-tracker'
+import { projectDir, workspaceDir } from './pai-paths'
 
 type WatchScope = 'workspace' | 'project'
 
@@ -55,11 +56,11 @@ export class FileWatchService {
       }
     })
 
-    const addWatcher = (dirPath: string, recursive = false) => {
+    const addWatcher = (dirPath: string, recursive = false, acceptAll = false) => {
       try {
         const watcher = watch(dirPath, { persistent: false, recursive }, (_eventType, filename) => {
           const changedPath = filename ? join(dirPath, String(filename)) : dirPath
-          if (!isWatchedPath(scope, root, changedPath)) return
+          if (!acceptAll && !isWatchedPath(scope, root, changedPath)) return
           if (this.writeTracker.isInternal(changedPath)) return
           emitChange()
         })
@@ -72,10 +73,10 @@ export class FileWatchService {
 
     if (scope === 'workspace') {
       addWatcher(root)
-      addWatcher(join(root, '.pai'))
+      addWatcher(workspaceDir(rootPath), true, true)
     } else {
       addWatcher(root)
-      addWatcher(join(root, '.pai'), true)
+      addWatcher(projectDir(rootPath), true, true)
     }
 
     this.subscriptions.set(id, { id, scope, rootPath, sender, watchers, timers })
