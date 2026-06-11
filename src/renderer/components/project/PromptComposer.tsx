@@ -20,6 +20,8 @@ interface PromptComposerProps {
   disabled?: boolean
   inputDisabled?: boolean
   controls?: React.ReactNode
+  attachments?: React.ReactNode
+  onAttach?: () => void
   className?: string
   showTopBorder?: boolean
 }
@@ -37,6 +39,8 @@ export function PromptComposer({
   disabled = false,
   inputDisabled = false,
   controls,
+  attachments,
+  onAttach,
   className,
   showTopBorder = true,
 }: PromptComposerProps) {
@@ -47,6 +51,7 @@ export function PromptComposer({
   return (
     <div className={cn('shrink-0 bg-background/80 px-4 py-2 backdrop-blur', showTopBorder && 'border-t', className)}>
       <div className="mx-auto flex max-w-5xl flex-col gap-2 rounded-lg border bg-[hsl(var(--surface-raised))] px-3 py-2 shadow-xl shadow-black/[0.06]">
+        {attachments}
         <div className="min-h-11">
           <Textarea
             value={value}
@@ -63,7 +68,7 @@ export function PromptComposer({
           />
         </div>
         <div className="flex h-8 items-center justify-between gap-3">
-          <Button variant="ghost" size="icon" className="size-8 shrink-0 rounded-md text-muted-foreground" aria-label="Attach context" disabled={disabled}>
+          <Button variant="ghost" size="icon" className="size-8 shrink-0 rounded-md text-muted-foreground" aria-label="Attach file" disabled={disabled || !onAttach} onClick={onAttach}>
             <Plus />
           </Button>
           <div className="flex min-w-0 items-center gap-2">

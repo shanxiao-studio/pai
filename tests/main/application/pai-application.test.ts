@@ -234,6 +234,39 @@ describe('PaiApplication chat agents', () => {
     expect(store.appendChatLog.mock.invocationCallOrder[0]).toBeLessThan(runtime.start.mock.invocationCallOrder[0])
   })
 
+  it('persists user attachments before starting a regular chat agent', async () => {
+    const { app, runtime, store } = createHarness()
+    const attachment = {
+      type: 'attachment' as const,
+      path: '/tmp/screenshot.png',
+      name: 'screenshot.png',
+      size: 2048,
+      mimeType: 'image/png',
+      kind: 'image' as const,
+    }
+
+    await app.startChat({
+      agentKind: 'codex',
+      model: 'gpt-5',
+      thinking: 'medium',
+      message: 'hello\n\nAttachments:\n- screenshot.png: /tmp/screenshot.png (2.0 KB)',
+      userMessage: 'hello',
+      attachments: [attachment],
+      workspacePath: '/project',
+      sessionId: 'chat-1',
+    })
+
+    expect(store.appendChatLog).toHaveBeenCalledWith('/project', 'chat-1', {
+      role: 'user',
+      content: 'hello',
+      parts: [{ type: 'text', text: 'hello' }, attachment],
+    })
+    expect(runtime.start).toHaveBeenCalledWith(expect.objectContaining({
+      message: expect.stringContaining('/tmp/screenshot.png'),
+      attachments: [attachment],
+    }), expect.any(Object))
+  })
+
   it('persists structured assistant output for chat sessions on completion', async () => {
     const { app, runtime, store } = createHarness()
     ;(runtime.start as ReturnType<typeof vi.fn>).mockImplementationOnce(async (_input, hooks) => {

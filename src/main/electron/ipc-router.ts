@@ -1,11 +1,46 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { basename, extname } from 'path'
+import { readFile, stat } from 'fs/promises'
 import { PaiApplication } from '../application/pai-application'
+import { createChatAttachment, filterChatAttachments, MAX_ATTACHMENT_BYTES, type ChatAttachment } from '../core/attachments'
 import { AgentRunInput, DotagentsConfig, ProjectIssue, WorkspaceSettings } from '../core/models'
 
 export function registerIpcHandlers(pai: PaiApplication) {
   ipcMain.handle('dialog:openFolder', async () => {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] })
     return result.canceled ? null : result.filePaths[0]
+  })
+
+  ipcMain.handle('dialog:selectAttachments', async (event, existing: ChatAttachment[] = []) => {
+    const window = BrowserWindow.fromWebContents(event.sender)
+    const result = window
+      ? await dialog.showOpenDialog(window, { properties: ['openFile', 'multiSelections'] })
+      : await dialog.showOpenDialog({ properties: ['openFile', 'multiSelections'] })
+
+    if (result.canceled) return { accepted: [], rejected: [] }
+
+    const candidates = await Promise.all(result.filePaths.map(async (filePath) => {
+      const info = await stat(filePath)
+      return createChatAttachment({
+        path: filePath,
+        name: basename(filePath),
+        size: info.size,
+        mimeType: mimeTypeFromPath(filePath),
+      })
+    }))
+
+    return filterChatAttachments(candidates, existing)
+  })
+
+  ipcMain.handle('attachment:readPreview', async (_event, filePath: string) => {
+    const mimeType = mimeTypeFromPath(filePath)
+    if (!mimeType?.startsWith('image/')) return null
+
+    const info = await stat(filePath)
+    if (info.size > MAX_ATTACHMENT_BYTES) return null
+
+    const data = await readFile(filePath)
+    return `data:${mimeType};base64,${data.toString('base64')}`
   })
 
   ipcMain.handle('app:getPath', (_event, name: string) => {
@@ -158,4 +193,26 @@ export function registerIpcHandlers(pai: PaiApplication) {
   ipcMain.handle('agent:cancel', (_event, sessionId: string) => {
     return pai.cancelChat(sessionId)
   })
+}
+
+function mimeTypeFromPath(filePath: string) {
+  switch (extname(filePath).toLowerCase()) {
+    case '.apng':
+      return 'image/apng'
+    case '.avif':
+      return 'image/avif'
+    case '.gif':
+      return 'image/gif'
+    case '.jpeg':
+    case '.jpg':
+      return 'image/jpeg'
+    case '.png':
+      return 'image/png'
+    case '.svg':
+      return 'image/svg+xml'
+    case '.webp':
+      return 'image/webp'
+    default:
+      return undefined
+  }
 }

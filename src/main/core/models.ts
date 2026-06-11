@@ -1,4 +1,5 @@
 import type { StoredMessagePart } from './chat-message-parts'
+import type { ChatAttachment } from './attachments'
 
 export type ThemePreference = 'system' | 'light' | 'dark'
 
@@ -96,6 +97,7 @@ export type AgentRunInput = {
   thinking: string
   message: string
   userMessage?: string
+  attachments?: ChatAttachment[]
   workspacePath: string
   sessionId?: string
   source?: 'chat' | 'issue'

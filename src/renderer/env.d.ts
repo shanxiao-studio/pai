@@ -29,9 +29,27 @@ declare global {
     exists: boolean
   }
 
+  type ChatAttachment = {
+    type: 'attachment'
+    path: string
+    name: string
+    size: number
+    mimeType?: string
+    kind: 'image' | 'file'
+  }
+
+  type RejectedAttachment = {
+    path: string
+    name: string
+    size: number
+    reason: 'duplicate' | 'too-large' | 'too-many'
+  }
+
   interface Window {
     electronAPI?: {
       openFolder: () => Promise<string | null>
+      selectAttachments: (existing: ChatAttachment[]) => Promise<{ accepted: ChatAttachment[]; rejected: RejectedAttachment[] }>
+      readAttachmentPreview: (path: string) => Promise<string | null>
       getPath: (name: string) => Promise<string>
       importProject: () => Promise<ImportedProject | null>
       createWorkspace: (name: string, parentPath: string) => Promise<{ name: string; path: string }>
@@ -117,6 +135,7 @@ declare global {
         thinking: string
         message: string
         userMessage?: string
+        attachments?: ChatAttachment[]
         workspacePath: string
         sessionId?: string
       }) => Promise<{ sessionId: string }>

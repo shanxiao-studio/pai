@@ -17,8 +17,26 @@ type DotagentsConfig = {
   exists: boolean
 }
 
+type ChatAttachment = {
+  type: 'attachment'
+  path: string
+  name: string
+  size: number
+  mimeType?: string
+  kind: 'image' | 'file'
+}
+
+type RejectedAttachment = {
+  path: string
+  name: string
+  size: number
+  reason: 'duplicate' | 'too-large' | 'too-many'
+}
+
 contextBridge.exposeInMainWorld('electronAPI', {
   openFolder: () => ipcRenderer.invoke('dialog:openFolder'),
+  selectAttachments: (existing: ChatAttachment[]) => ipcRenderer.invoke('dialog:selectAttachments', existing) as Promise<{ accepted: ChatAttachment[]; rejected: RejectedAttachment[] }>,
+  readAttachmentPreview: (path: string) => ipcRenderer.invoke('attachment:readPreview', path) as Promise<string | null>,
   getPath: (name: string) => ipcRenderer.invoke('app:getPath', name),
   importProject: () => ipcRenderer.invoke('project:importFolder'),
   createWorkspace: (name: string, parentPath: string) => ipcRenderer.invoke('workspace:create', { name, parentPath }),
@@ -84,6 +102,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     thinking: string
     message: string
     userMessage?: string
+    attachments?: ChatAttachment[]
     workspacePath: string
     sessionId?: string
   }) => ipcRenderer.invoke('agent:chat', params),

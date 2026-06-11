@@ -1,5 +1,6 @@
 export type StoredMessagePart =
   | { type: 'text'; text: string }
+  | { type: 'attachment'; path: string; name: string; size: number; mimeType?: string; kind: 'image' | 'file' }
   | { type: 'thinking'; text: string; state?: 'streaming' | 'done' }
   | { type: 'tool-call'; id?: string; name: string; args?: unknown; state?: 'running' | 'done' | 'error' }
   | { type: 'tool-result'; id?: string; name: string; result?: unknown; text?: string; isError?: boolean }
@@ -64,6 +65,11 @@ export function summarizeMessageParts(parts: StoredMessagePart[]) {
     if (part.type === 'text') {
       content += part.text
       visibleLines.push(part.text)
+      continue
+    }
+
+    if (part.type === 'attachment') {
+      visibleLines.push(`${part.name}: ${part.path}`)
       continue
     }
 

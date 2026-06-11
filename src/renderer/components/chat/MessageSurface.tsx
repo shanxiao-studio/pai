@@ -3,6 +3,8 @@ import ReactMarkdown from 'react-markdown'
 import { Activity, Brain, ChevronRight, Circle, FileJson, Terminal, Wrench } from 'lucide-react'
 import remarkGfm from 'remark-gfm'
 import { cn } from '@/lib/utils'
+import { formatBytes } from '@/shared/chat-attachments'
+import { AttachmentPreviewImage } from '@/components/chat/AttachmentPreviewImage'
 
 const MARKDOWN_PLUGINS = [remarkGfm]
 
@@ -18,6 +20,7 @@ export interface ChatMessage {
 
 export type MessagePart =
   | { type: 'text'; text: string }
+  | ChatAttachment
   | { type: 'thinking'; text: string; state?: 'streaming' | 'done' }
   | { type: 'tool-call'; id?: string; name: string; args?: unknown; state?: 'running' | 'done' | 'error' }
   | { type: 'tool-result'; id?: string; name: string; result?: unknown; text?: string; isError?: boolean }
@@ -162,6 +165,10 @@ function MessagePartView({ part, isUser }: { part: MessagePart; isUser: boolean 
     return <MarkdownText text={part.text} isUser={isUser} />
   }
 
+  if (part.type === 'attachment') {
+    return <AttachmentPartView attachment={part} isUser={isUser} />
+  }
+
   if (part.type === 'thinking') {
     return (
       <details className={cn('group rounded-md border px-3 py-2 text-xs', isUser ? 'border-primary-foreground/20 bg-primary-foreground/10 text-primary-foreground/85' : 'bg-muted/35 text-muted-foreground')}>
@@ -203,6 +210,27 @@ function MessagePartView({ part, isUser }: { part: MessagePart; isUser: boolean 
     <ToolFrame icon={<Circle className="size-3" />} title={part.name}>
       {part.text && <pre className="whitespace-pre-wrap font-sans leading-5">{part.text}</pre>}
     </ToolFrame>
+  )
+}
+
+function AttachmentPartView({ attachment, isUser }: { attachment: ChatAttachment; isUser: boolean }) {
+  return (
+    <div className={cn(
+      'flex max-w-full items-center gap-2 rounded-md border p-2 text-xs',
+      isUser ? 'border-primary-foreground/20 bg-primary-foreground/10' : 'bg-muted/30',
+    )}>
+      <AttachmentPreviewImage
+        attachment={attachment}
+        className="size-11 rounded object-cover"
+        fallbackClassName={cn('size-11 rounded', isUser ? 'bg-primary-foreground/10' : 'bg-background/70')}
+      />
+      <div className="min-w-0 flex-1">
+        <div className="truncate font-medium">{attachment.name}</div>
+        <div className={cn('truncate text-[11px]', isUser ? 'text-primary-foreground/70' : 'text-muted-foreground')}>
+          {formatBytes(attachment.size)}
+        </div>
+      </div>
+    </div>
   )
 }
 
@@ -345,6 +373,16 @@ function normalizeMessagePart(value: unknown): MessagePart | null {
   if (!isRecord(value) || typeof value.type !== 'string') return null
 
   if (value.type === 'text' && typeof value.text === 'string') return { type: 'text', text: value.text }
+  if (value.type === 'attachment' && typeof value.path === 'string' && typeof value.name === 'string' && typeof value.size === 'number') {
+    return {
+      type: 'attachment',
+      path: value.path,
+      name: value.name,
+      size: value.size,
+      mimeType: typeof value.mimeType === 'string' ? value.mimeType : undefined,
+      kind: value.kind === 'image' ? 'image' : 'file',
+    }
+  }
   if (value.type === 'thinking' && typeof value.text === 'string') {
     return {
       type: 'thinking',

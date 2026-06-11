@@ -168,7 +168,7 @@ export class PaiApplication {
   async startChat(input: AgentRunInput) {
     const issueId = await this.store.findIssueIdForSession(input.workspacePath, input.sessionId)
     if (!issueId) {
-      await this.persistUserMessage(input.workspacePath, input.sessionId, input.source, input.userMessage ?? input.message)
+      await this.persistUserMessage(input.workspacePath, input.sessionId, input.source, input.userMessage ?? input.message, input.attachments)
       return this.launchAgent(input)
     }
 
@@ -176,7 +176,7 @@ export class PaiApplication {
     this.events.emit({ type: 'project.issuesChanged', projectPath: input.workspacePath })
 
     try {
-      await this.persistUserMessage(input.workspacePath, input.sessionId, 'issue', input.userMessage ?? input.message)
+      await this.persistUserMessage(input.workspacePath, input.sessionId, 'issue', input.userMessage ?? input.message, input.attachments)
       return await this.launchAgent({ ...input, source: 'issue' }, {
         onDone: async (data) => {
           await this.store.updateIssueStatus(input.workspacePath, issueId, data.exitCode === 0 ? 'done' : 'todo')
@@ -273,10 +273,14 @@ export class PaiApplication {
     sessionId: string | undefined,
     source: AgentRunInput['source'] | undefined,
     content: string,
+    attachments: AgentRunInput['attachments'] = [],
   ) {
     const trimmed = content.trim()
-    if (!trimmed) return
-    const parts = [{ type: 'text' as const, text: trimmed }]
+    if (!trimmed && attachments.length === 0) return
+    const parts = [
+      ...(trimmed ? [{ type: 'text' as const, text: trimmed }] : []),
+      ...attachments,
+    ]
 
     if (source === 'issue' || sessionId?.startsWith('issue-')) {
       const issueId = sessionId ? await this.resolveIssueIdForSession(projectPath, sessionId) : null

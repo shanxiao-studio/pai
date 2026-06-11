@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Activity, Archive, Bot, Check, ChevronDown, ChevronRight, Circle, LoaderCircle, MessageSquare, Pencil, Plus, Sparkles, StopCircle } from 'lucide-react'
+import { Activity, Archive, Bot, Check, ChevronDown, ChevronRight, Circle, LoaderCircle, MessageSquare, Pencil, Plus, Sparkles, StopCircle, X } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { MessageBubble as SharedMessageBubble, type ChatMessage } from '@/components/chat/MessageSurface'
+import { AttachmentPreviewImage } from '@/components/chat/AttachmentPreviewImage'
 import { ProjectTabs } from '@/components/project/ProjectTabs'
 import { PromptComposer } from '@/components/project/PromptComposer'
 import { cn } from '@/lib/utils'
 import { useProjects } from '@/components/project/ProjectProvider'
 import { electronClient } from '@/shared/api/electron-client'
+import { buildPromptWithAttachments, formatBytes, formatRejectedAttachments } from '@/shared/chat-attachments'
 import {
   consumeAgentOutput,
   countRenderableAssistantMessages,
@@ -131,6 +133,8 @@ export function ChatView() {
   const [assistantContent, setAssistantContent] = useState('')
   const [assistantThinking, setAssistantThinking] = useState('')
   const [assistantParts, setAssistantParts] = useState<NonNullable<ChatMessage['parts']>>([])
+  const [attachments, setAttachments] = useState<ChatAttachment[]>([])
+  const [attachmentNotice, setAttachmentNotice] = useState('')
   const [sessionSidebarWidth, setSessionSidebarWidth] = useState(loadSessionSidebarWidth)
   const [engineSnapshot, setEngineSnapshot] = useState<EngineSnapshot | null>(null)
   const [engineOpen, setEngineOpen] = useState(false)
@@ -433,13 +437,31 @@ export function ChatView() {
 
   // ── Submit ───────────────────────────────────────────
 
+  const handleAttach = useCallback(async () => {
+    const result = await electronClient?.selectAttachments(attachments)
+    if (!result) return
+    if (result.accepted.length > 0) {
+      setAttachments((current) => [...current, ...result.accepted])
+    }
+    setAttachmentNotice(formatRejectedAttachments(result.rejected))
+  }, [attachments])
+
+  const handleRemoveAttachment = useCallback((path: string) => {
+    setAttachments((current) => current.filter((attachment) => attachment.path !== path))
+    setAttachmentNotice('')
+  }, [])
+
   const handleSubmit = useCallback(async (submittedValue?: string) => {
     const prompt = (submittedValue ?? input).trim()
-    if (!prompt || running || !agentKind || !activeSessionId) return
+    if ((!prompt && attachments.length === 0) || running || !agentKind || !activeSessionId) return
 
     const expectedSessionId = activeSessionId
     const assistantMessagesBeforeRun = countRenderableAssistantMessages(messagesBySession.get(expectedSessionId) ?? [])
+    const submittedAttachments = attachments
+    const messageForAgent = buildPromptWithAttachments(prompt, submittedAttachments)
     setInput('')
+    setAttachments([])
+    setAttachmentNotice('')
     setAssistantContent('')
     setAssistantThinking('')
     setAssistantParts([])
@@ -454,7 +476,15 @@ export function ChatView() {
     }
     shouldStickToBottom.current = true
 
-    const userMsg: ChatMessage = { id: String(Date.now()), role: 'user', content: prompt, parts: [{ type: 'text', text: prompt }] }
+    const userMsg: ChatMessage = {
+      id: String(Date.now()),
+      role: 'user',
+      content: prompt,
+      parts: [
+        ...(prompt ? [{ type: 'text' as const, text: prompt }] : []),
+        ...submittedAttachments,
+      ],
+    }
     setMessagesBySession((prev) => {
       const next = new Map(prev)
       next.set(expectedSessionId, [...(next.get(expectedSessionId) ?? []), userMsg])
@@ -520,8 +550,9 @@ export function ChatView() {
         agentKind,
         model: model || models[0] || '',
         thinking: thinking || DEFAULT_THINKING[agentKind] || 'medium',
-        message: prompt,
+        message: messageForAgent,
         userMessage: prompt,
+        attachments: submittedAttachments,
         workspacePath: projectPath,
         sessionId: expectedSessionId,
       })
@@ -553,7 +584,7 @@ export function ChatView() {
       outputCleanup.current = null
       doneCleanup.current = null
     }
-  }, [input, running, agentKind, model, thinking, models, project, activeSessionId, loadSessionMessages, messagesBySession])
+  }, [input, attachments, running, agentKind, model, thinking, models, project, activeSessionId, loadSessionMessages, messagesBySession])
 
   const handleCancel = useCallback(async () => {
     if (runSessionId) await electronClient?.cancelChat(runSessionId)
@@ -686,6 +717,14 @@ export function ChatView() {
             value={input} onChange={setInput} onSubmit={handleSubmit}
             disabled={running}
             inputDisabled={running}
+            onAttach={handleAttach}
+            attachments={
+              <AttachmentComposerPreview
+                attachments={attachments}
+                notice={attachmentNotice}
+                onRemove={handleRemoveAttachment}
+              />
+            }
             showTopBorder={false}
             placeholder={running ? `${agentLabel} is responding...` : `Message ${agentLabel}...`}
             className="pl-[calc(var(--traffic-light-safe-width,0px)+2rem)] pr-8 lg:pl-[calc(var(--traffic-light-safe-width,0px)+2.5rem)] lg:pr-10"
@@ -755,6 +794,49 @@ export function ChatView() {
 }
 
 // ─── Sub-components ───────────────────────────────────────
+
+function AttachmentComposerPreview({
+  attachments,
+  notice,
+  onRemove,
+}: {
+  attachments: ChatAttachment[]
+  notice: string
+  onRemove: (path: string) => void
+}) {
+  if (attachments.length === 0 && !notice) return null
+
+  return (
+    <div className="flex flex-col gap-2">
+      {attachments.length > 0 && (
+        <div className="flex max-h-28 flex-wrap gap-2 overflow-y-auto">
+          {attachments.map((attachment) => (
+            <div key={attachment.path} className="group flex max-w-56 items-center gap-2 rounded-md border bg-background/70 p-1.5 text-xs">
+              <AttachmentPreviewImage
+                attachment={attachment}
+                className="size-8 rounded object-cover"
+                fallbackClassName="size-8 rounded bg-muted"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-medium">{attachment.name}</div>
+                <div className="text-[11px] text-muted-foreground">{formatBytes(attachment.size)}</div>
+              </div>
+              <button
+                type="button"
+                onClick={() => onRemove(attachment.path)}
+                className="pressable rounded p-0.5 text-muted-foreground opacity-70 hover:bg-muted hover:text-foreground group-hover:opacity-100"
+                aria-label={`Remove ${attachment.name}`}
+              >
+                <X className="size-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+      {notice && <div className="text-xs text-muted-foreground">{notice}</div>}
+    </div>
+  )
+}
 
 function EngineStatus({
   snapshot,
