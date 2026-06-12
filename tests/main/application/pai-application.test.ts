@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { AppEventBus, PaiAppEvent } from '../../../src/main/core/app-event-bus'
-import { AgentRunInput, WorkspaceSettings } from '../../../src/main/core/models'
+import { AgentRunInput, GlobalSettings, WorkspaceSettings } from '../../../src/main/core/models'
 import { AgentRegistry } from '../../../src/main/infra/agents/agent-registry'
 import { AgentRuntime } from '../../../src/main/infra/agents/agent-runtime'
 import { FileWatchService } from '../../../src/main/infra/fs/file-watch-service'
@@ -22,10 +22,13 @@ function createHarness() {
       name: 'Workspace',
       description: '',
       agentsMd: '',
+    })),
+    writeWorkspaceSettings: vi.fn(async (_workspacePath: string, settings: WorkspaceSettings) => settings),
+    readGlobalSettings: vi.fn(async () => ({
       theme: 'system',
       timezone: 'Asia/Shanghai',
     })),
-    writeWorkspaceSettings: vi.fn(async (_workspacePath: string, settings: WorkspaceSettings) => settings),
+    writeGlobalSettings: vi.fn(async (settings: GlobalSettings) => settings),
     inspectProjectFolder: vi.fn(async () => ({ name: 'Project', path: '/project' })),
     readAgentConfig: vi.fn(async () => ({ agents: { default: 'codex' } })),
     writeAgentConfig: vi.fn(async (_projectPath: string, config: { kind: string; model: string; thinking: string }) => config),
@@ -98,6 +101,8 @@ describe('PaiApplication delegations', () => {
     await expect(app.addProjectToWorkspace('/workspace', '/project')).resolves.toEqual({ name: 'Project', path: '/project' })
     await app.removeProjectFromWorkspace('/workspace', '/project')
     await expect(app.readWorkspaceSettings('/workspace')).resolves.toMatchObject({ name: 'Workspace' })
+    await expect(app.readGlobalSettings()).resolves.toEqual({ theme: 'system', timezone: 'Asia/Shanghai' })
+    await expect(app.writeGlobalSettings({ theme: 'dark', timezone: 'UTC' })).resolves.toEqual({ theme: 'dark', timezone: 'UTC' })
     await expect(app.inspectProjectFolder('/project')).resolves.toMatchObject({ name: 'Project' })
 
     expect(app.watchWorkspace(sender as never, '/workspace')).toBe('workspace-watch')
@@ -163,8 +168,6 @@ describe('PaiApplication delegations', () => {
       name: 'Workspace',
       description: 'Description',
       agentsMd: '# Agents',
-      theme: 'dark',
-      timezone: 'Asia/Shanghai',
     }
 
     await expect(app.writeWorkspaceSettings('/workspace', settings)).resolves.toEqual(settings)

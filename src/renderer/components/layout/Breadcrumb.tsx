@@ -23,16 +23,18 @@ export function Breadcrumb({
   // Determine current view label
   const pathSegments = location.pathname.split('/').filter(Boolean)
   const viewSegment = pathSegments[pathSegments.length - 1]
+  const isSettingsPath = pathSegments[0] === 'settings'
   let viewLabel = ''
-  if (viewSegment === 'settings') viewLabel = 'Settings'
+  if (isSettingsPath) viewLabel = viewSegment === 'workspace' ? 'Workspace' : 'Global'
   else if (viewSegment === 'overview') viewLabel = 'Overview'
   else if (viewSegment === 'chat') viewLabel = 'Chat'
   else if (viewSegment === 'issues') viewLabel = issueId ? `Issues / ${issueId}` : 'Issues'
   else viewLabel = ''
 
-  const items = viewSegment === 'settings'
+  const items = isSettingsPath
     ? [
         { label: activeWorkspace?.name ?? '', icon: FolderOpen },
+        { label: 'Settings' },
         { label: viewLabel },
       ].filter((item) => item.label)
     : [

@@ -8,6 +8,7 @@ import {
   ChatSession,
   CodexAppServerConfig,
   DotagentsConfig,
+  GlobalSettings,
   DotagentsHook,
   DotagentsMcp,
   DotagentsSkill,
@@ -134,26 +135,46 @@ export class PaiStore {
       name: typeof config.name === 'string' ? config.name : basename(workspacePath),
       description: typeof config.description === 'string' ? config.description : '',
       agentsMd: '',
-      theme: isTheme(config.theme) ? config.theme : 'system',
-      timezone: typeof config.timezone === 'string' ? config.timezone : Intl.DateTimeFormat().resolvedOptions().timeZone,
     }
   }
 
   async writeWorkspaceSettings(workspacePath: string, settings: WorkspaceSettings): Promise<WorkspaceSettings> {
     const existing = (await this.readWorkspaceToml(workspacePath)) ?? {}
-    const merged = {
+    const merged: JsonRecord = {
       ...existing,
       name: settings.name,
       description: settings.description,
-      theme: isTheme(settings.theme) ? settings.theme : 'system',
-      timezone: settings.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
     }
+    delete merged.theme
+    delete merged.timezone
 
     await this.writeWorkspaceToml(workspacePath, merged)
     return {
       name: String(merged.name),
       description: String(merged.description),
       agentsMd: '',
+    }
+  }
+
+  async readGlobalSettings(): Promise<GlobalSettings> {
+    const config = await this.readGlobalConfig()
+    return {
+      theme: isTheme(config.theme) ? config.theme : 'system',
+      timezone: typeof config.timezone === 'string' ? config.timezone : Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }
+  }
+
+  async writeGlobalSettings(settings: GlobalSettings): Promise<GlobalSettings> {
+    const existing = await this.readGlobalConfig()
+    const merged = {
+      ...existing,
+      theme: isTheme(settings.theme) ? settings.theme : 'system',
+      timezone: settings.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone,
+    }
+
+    await fs.mkdir(paiDataRoot(), { recursive: true })
+    await this.writeTextFile(globalConfigPath(), stringify(merged))
+    return {
       theme: merged.theme as ThemePreference,
       timezone: String(merged.timezone),
     }

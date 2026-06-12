@@ -63,8 +63,10 @@ declare global {
       importProject: () => Promise<ImportedProject | null>
       createWorkspace: (name: string, parentPath: string) => Promise<{ name: string; path: string }>
       readConfig: (folderPath: string) => Promise<ImportedProject[]>
-      readWorkspaceSettings: (workspacePath: string) => Promise<{ name: string; description: string; agentsMd: string; theme: 'system' | 'light' | 'dark'; timezone: string }>
-      writeWorkspaceSettings: (workspacePath: string, settings: { name: string; description: string; agentsMd: string; theme: string; timezone: string }) => Promise<{ name: string; description: string; agentsMd: string; theme: 'system' | 'light' | 'dark'; timezone: string }>
+      readWorkspaceSettings: (workspacePath: string) => Promise<{ name: string; description: string; agentsMd: string }>
+      writeWorkspaceSettings: (workspacePath: string, settings: { name: string; description: string; agentsMd: string }) => Promise<{ name: string; description: string; agentsMd: string }>
+      readGlobalSettings: () => Promise<{ theme: 'system' | 'light' | 'dark'; timezone: string }>
+      writeGlobalSettings: (settings: { theme: string; timezone: string }) => Promise<{ theme: 'system' | 'light' | 'dark'; timezone: string }>
       watchWorkspace: (workspacePath: string, callback: (data: { workspacePath: string }) => void) => Promise<() => void>
       addProjectToConfig: (workspacePath: string, projectPath: string) => Promise<ImportedProject>
       removeProjectFromConfig: (workspacePath: string, projectPath: string) => Promise<void>

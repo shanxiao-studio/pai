@@ -1,6 +1,6 @@
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { dirname, join } from 'path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { PaiStore } from '../../../src/main/infra/fs/pai-store'
 import { InternalWriteTracker } from '../../../src/main/infra/fs/internal-write-tracker'
@@ -88,6 +88,56 @@ describe('PaiStore orchestrator config', () => {
         turnTimeoutMs: 3600000,
       },
     })
+  })
+})
+
+describe('PaiStore settings', () => {
+  it('keeps theme and timezone out of workspace settings', async () => {
+    const root = await createProjectDir()
+    const workspacePath = join(root, 'workspace')
+    const store = new PaiStore(new InternalWriteTracker())
+
+    await store.createWorkspace('workspace', root)
+    await writeFile(workspaceConfigPath(workspacePath), 'name = "Workspace"\ndescription = "Old"\ntheme = "dark"\ntimezone = "UTC"\n')
+
+    await expect(store.readWorkspaceSettings(workspacePath)).resolves.toEqual({
+      name: 'Workspace',
+      description: 'Old',
+      agentsMd: '',
+    })
+
+    await store.writeWorkspaceSettings(workspacePath, {
+      name: 'Workspace',
+      description: 'New',
+      agentsMd: '',
+    })
+
+    const raw = await readFile(workspaceConfigPath(workspacePath), 'utf8')
+    expect(raw).toContain('description = "New"')
+    expect(raw).not.toContain('theme')
+    expect(raw).not.toContain('timezone')
+  })
+
+  it('stores theme and timezone in global settings without overwriting other global config', async () => {
+    const store = new PaiStore(new InternalWriteTracker())
+
+    await mkdir(dirname(globalConfigPath()), { recursive: true })
+    await writeFile(globalConfigPath(), '[project_workspaces]\nabc = "workspace-id"\n')
+
+    await expect(store.writeGlobalSettings({ theme: 'dark', timezone: 'UTC' })).resolves.toEqual({
+      theme: 'dark',
+      timezone: 'UTC',
+    })
+    await expect(store.readGlobalSettings()).resolves.toEqual({
+      theme: 'dark',
+      timezone: 'UTC',
+    })
+
+    const raw = await readFile(globalConfigPath(), 'utf8')
+    expect(raw).toContain('theme = "dark"')
+    expect(raw).toContain('timezone = "UTC"')
+    expect(raw).toContain('[project_workspaces]')
+    expect(raw).toContain('abc = "workspace-id"')
   })
 })
 

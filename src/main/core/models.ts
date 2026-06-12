@@ -24,6 +24,9 @@ export type WorkspaceSettings = {
   name: string
   description: string
   agentsMd: string
+}
+
+export type GlobalSettings = {
   theme: ThemePreference
   timezone: string
 }

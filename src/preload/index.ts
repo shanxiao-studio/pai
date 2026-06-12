@@ -51,8 +51,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   createWorkspace: (name: string, parentPath: string) => ipcRenderer.invoke('workspace:create', { name, parentPath }),
   readConfig: (folderPath: string) => ipcRenderer.invoke('workspace:readConfig', folderPath),
   readWorkspaceSettings: (workspacePath: string) => ipcRenderer.invoke('workspace:readSettings', workspacePath),
-  writeWorkspaceSettings: (workspacePath: string, settings: { name: string; description: string; agentsMd: string; theme: string; timezone: string }) =>
+  writeWorkspaceSettings: (workspacePath: string, settings: { name: string; description: string; agentsMd: string }) =>
     ipcRenderer.invoke('workspace:writeSettings', workspacePath, settings),
+  readGlobalSettings: () => ipcRenderer.invoke('settings:readGlobal'),
+  writeGlobalSettings: (settings: { theme: string; timezone: string }) =>
+    ipcRenderer.invoke('settings:writeGlobal', settings),
   watchWorkspace: async (workspacePath: string, callback: (data: { workspacePath: string }) => void) => {
     const watchId = await ipcRenderer.invoke('workspace:watch', workspacePath)
     const handler = (_event: Electron.IpcRendererEvent, data: { workspacePath: string }) => callback(data)

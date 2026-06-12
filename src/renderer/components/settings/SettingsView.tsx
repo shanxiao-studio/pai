@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Clock, Monitor, Moon, Settings, Sun } from 'lucide-react'
+import { Navigate, NavLink, useParams } from 'react-router-dom'
+import { Monitor, Moon, Settings, Sun } from 'lucide-react'
 import { Input } from '@/components/ui/input'
 import { ScrollArea } from '@/components/ui/scroll-area'
 import { Textarea } from '@/components/ui/textarea'
 import { useWorkspaces } from '@/components/workspace/WorkspaceProvider'
-import type { ThemePreference, WorkspaceSettings } from '@/data/workspace'
+import type { GlobalSettings, ThemePreference, WorkspaceSettings } from '@/data/workspace'
 import { applyTheme } from '@/lib/theme'
 import { cn } from '@/lib/utils'
 import { electronClient } from '@/shared/api/electron-client'
@@ -32,45 +33,69 @@ const DEFAULT_SETTINGS: WorkspaceSettings = {
   name: '',
   description: '',
   agentsMd: '',
+}
+
+const DEFAULT_GLOBAL_SETTINGS: GlobalSettings = {
   theme: 'system',
   timezone: DEFAULT_TIMEZONE,
 }
 
 export function SettingsView() {
+  const { section } = useParams()
   const { activeWorkspace, updateWorkspace } = useWorkspaces()
   const [settings, setSettings] = useState<WorkspaceSettings>(DEFAULT_SETTINGS)
-  const [loaded, setLoaded] = useState(false)
-  const saveTimer = useRef<number | null>(null)
+  const [globalSettings, setGlobalSettings] = useState<GlobalSettings>(DEFAULT_GLOBAL_SETTINGS)
+  const [workspaceLoaded, setWorkspaceLoaded] = useState(false)
+  const [globalLoaded, setGlobalLoaded] = useState(false)
+  const workspaceSaveTimer = useRef<number | null>(null)
+  const globalSaveTimer = useRef<number | null>(null)
+  const isGlobalPage = section === 'global'
+  const isWorkspacePage = section === 'workspace'
 
   const timezones = useMemo(() => {
     const values = typeof Intl.supportedValuesOf === 'function'
       ? Intl.supportedValuesOf('timeZone')
       : FALLBACK_TIMEZONES
-    return values.includes(settings.timezone) ? values : [settings.timezone, ...values]
-  }, [settings.timezone])
+    return values.includes(globalSettings.timezone) ? values : [globalSettings.timezone, ...values]
+  }, [globalSettings.timezone])
 
   const loadSettings = useCallback(async () => {
     if (!activeWorkspace?.path) return
-    setLoaded(false)
+    setWorkspaceLoaded(false)
     const loadedSettings = await electronClient?.readWorkspaceSettings(activeWorkspace.path)
     if (!loadedSettings) return
     setSettings({
       name: loadedSettings.name || activeWorkspace.name,
       description: loadedSettings.description ?? '',
       agentsMd: '',
+    })
+    setWorkspaceLoaded(true)
+  }, [activeWorkspace?.name, activeWorkspace?.path])
+
+  const loadGlobalSettings = useCallback(async () => {
+    setGlobalLoaded(false)
+    const loadedSettings = await electronClient?.readGlobalSettings()
+    if (!loadedSettings) return
+    setGlobalSettings({
       theme: loadedSettings.theme ?? 'system',
       timezone: loadedSettings.timezone || DEFAULT_TIMEZONE,
     })
     applyTheme(loadedSettings.theme ?? 'system')
-    setLoaded(true)
-  }, [activeWorkspace?.name, activeWorkspace?.path])
+    setGlobalLoaded(true)
+  }, [])
 
   useEffect(() => {
+    if (!isWorkspacePage) return
     void loadSettings()
-  }, [loadSettings])
+  }, [isWorkspacePage, loadSettings])
 
   useEffect(() => {
-    if (!activeWorkspace?.path) return
+    if (!isGlobalPage) return
+    void loadGlobalSettings()
+  }, [isGlobalPage, loadGlobalSettings])
+
+  useEffect(() => {
+    if (!isWorkspacePage || !activeWorkspace?.path) return
 
     let cancelled = false
     let unsubscribe: (() => void) | undefined
@@ -86,27 +111,46 @@ export function SettingsView() {
       cancelled = true
       unsubscribe?.()
     }
-  }, [activeWorkspace?.path, loadSettings])
+  }, [activeWorkspace?.path, isWorkspacePage, loadSettings])
 
   useEffect(() => {
-    if (!loaded || !activeWorkspace?.path) return
-    if (saveTimer.current) window.clearTimeout(saveTimer.current)
+    if (!isWorkspacePage || !workspaceLoaded || !activeWorkspace?.path) return
+    if (workspaceSaveTimer.current) window.clearTimeout(workspaceSaveTimer.current)
 
-    applyTheme(settings.theme)
-    saveTimer.current = window.setTimeout(() => {
+    workspaceSaveTimer.current = window.setTimeout(() => {
       void electronClient?.writeWorkspaceSettings(activeWorkspace.path, settings).then((saved) => {
         updateWorkspace(activeWorkspace.id, { name: saved.name || activeWorkspace.name })
       })
     }, 500)
 
     return () => {
-      if (saveTimer.current) window.clearTimeout(saveTimer.current)
+      if (workspaceSaveTimer.current) window.clearTimeout(workspaceSaveTimer.current)
     }
-  }, [activeWorkspace?.id, activeWorkspace?.name, activeWorkspace?.path, loaded, settings, updateWorkspace])
+  }, [activeWorkspace?.id, activeWorkspace?.name, activeWorkspace?.path, isWorkspacePage, workspaceLoaded, settings, updateWorkspace])
+
+  useEffect(() => {
+    if (!isGlobalPage || !globalLoaded) return
+    if (globalSaveTimer.current) window.clearTimeout(globalSaveTimer.current)
+
+    applyTheme(globalSettings.theme)
+    globalSaveTimer.current = window.setTimeout(() => {
+      void electronClient?.writeGlobalSettings(globalSettings)
+    }, 500)
+
+    return () => {
+      if (globalSaveTimer.current) window.clearTimeout(globalSaveTimer.current)
+    }
+  }, [globalLoaded, globalSettings, isGlobalPage])
 
   const patchSettings = (patch: Partial<WorkspaceSettings>) => {
     setSettings((prev) => ({ ...prev, ...patch }))
   }
+
+  const patchGlobalSettings = (patch: Partial<GlobalSettings>) => {
+    setGlobalSettings((prev) => ({ ...prev, ...patch }))
+  }
+
+  if (!isGlobalPage && !isWorkspacePage) return <Navigate to="/settings/global" replace />
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -117,61 +161,66 @@ export function SettingsView() {
       <div className="flex min-h-0 flex-1">
         <aside className="hidden w-56 shrink-0 border-r bg-muted/30 p-4 lg:block">
           <nav className="flex flex-col gap-1">
-            <SettingsLink icon={Settings} label="Workspace" active />
-            <SettingsLink icon={Monitor} label="Appearance" />
-            <SettingsLink icon={Clock} label="Time" />
+            <SettingsLink to="/settings/global" icon={Monitor} label="Global" active={isGlobalPage} />
+            <SettingsLink to="/settings/workspace" icon={Settings} label="Workspace" active={isWorkspacePage} />
           </nav>
         </aside>
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="mx-auto flex max-w-3xl flex-col py-7 pl-[calc(var(--traffic-light-safe-width,0px)+1.75rem)] pr-7">
-            <section className="grid gap-5 border-b pb-8">
-              <label className="grid gap-2">
-                <span className="text-sm font-medium">Name</span>
-                <Input value={settings.name} onChange={(event) => patchSettings({ name: event.target.value })} placeholder="Workspace name" />
-              </label>
-              <label className="grid gap-2">
-                <span className="text-sm font-medium">Description</span>
-                <Textarea
-                  value={settings.description}
-                  onChange={(event) => patchSettings({ description: event.target.value })}
-                  placeholder="What this workspace is for..."
-                  className="min-h-[96px] resize-none text-sm leading-6"
-                />
-              </label>
-            </section>
-
-            <section className="grid gap-5 border-b py-8">
-              <div className="grid grid-cols-3 gap-2">
-                {THEME_OPTIONS.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    onClick={() => patchSettings({ theme: option.id })}
-                    className={cn(
-                      'flex h-10 items-center justify-center gap-2 rounded-md border text-sm font-medium transition-colors',
-                      settings.theme === option.id ? 'border-primary bg-accent text-accent-foreground' : 'bg-background text-muted-foreground hover:bg-muted/50 hover:text-foreground',
-                    )}
+            {isGlobalPage && (
+              <section className="grid gap-5">
+                <h2 className="text-sm font-semibold">Global Settings</h2>
+                <div className="grid gap-2">
+                  <span className="text-sm font-medium">Theme</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    {THEME_OPTIONS.map((option) => (
+                      <button
+                        key={option.id}
+                        type="button"
+                        onClick={() => patchGlobalSettings({ theme: option.id })}
+                        className={cn(
+                          'flex h-10 items-center justify-center gap-2 rounded-md border text-sm font-medium transition-colors',
+                          globalSettings.theme === option.id ? 'border-primary bg-accent text-accent-foreground' : 'bg-background text-muted-foreground hover:bg-muted/50 hover:text-foreground',
+                        )}
+                      >
+                        <option.icon className="size-4" />
+                        {option.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <label className="grid gap-2">
+                  <span className="text-sm font-medium">Timezone</span>
+                  <select
+                    value={globalSettings.timezone}
+                    onChange={(event) => patchGlobalSettings({ timezone: event.target.value })}
+                    className="h-9 rounded-md border bg-background px-3 text-sm"
                   >
-                    <option.icon className="size-4" />
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </section>
+                    {timezones.map((timezone) => <option key={timezone} value={timezone}>{timezone}</option>)}
+                  </select>
+                </label>
+              </section>
+            )}
 
-            <section className="grid gap-5 py-8">
-              <label className="grid gap-2">
-                <span className="text-sm font-medium">Timezone</span>
-                <select
-                  value={settings.timezone}
-                  onChange={(event) => patchSettings({ timezone: event.target.value })}
-                  className="h-9 rounded-md border bg-background px-3 text-sm"
-                >
-                  {timezones.map((timezone) => <option key={timezone} value={timezone}>{timezone}</option>)}
-                </select>
-              </label>
-            </section>
+            {isWorkspacePage && (
+              <section className="grid gap-5">
+                <h2 className="text-sm font-semibold">Workspace Settings</h2>
+                <label className="grid gap-2">
+                  <span className="text-sm font-medium">Name</span>
+                  <Input value={settings.name} onChange={(event) => patchSettings({ name: event.target.value })} placeholder="Workspace name" />
+                </label>
+                <label className="grid gap-2">
+                  <span className="text-sm font-medium">Description</span>
+                  <Textarea
+                    value={settings.description}
+                    onChange={(event) => patchSettings({ description: event.target.value })}
+                    placeholder="What this workspace is for..."
+                    className="min-h-[96px] resize-none text-sm leading-6"
+                  />
+                </label>
+              </section>
+            )}
           </div>
         </ScrollArea>
       </div>
@@ -179,11 +228,17 @@ export function SettingsView() {
   )
 }
 
-function SettingsLink({ icon: Icon, label, active }: { icon: typeof Settings; label: string; active?: boolean }) {
+function SettingsLink({ to, icon: Icon, label, active }: { to: string; icon: typeof Settings; label: string; active?: boolean }) {
   return (
-    <div className={cn('flex items-center gap-2 rounded-md px-2 py-1.5 text-sm', active ? 'bg-background font-medium shadow-sm ring-1 ring-border/70' : 'text-muted-foreground')}>
+    <NavLink
+      to={to}
+      className={cn(
+        'flex items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-background hover:text-foreground',
+        active ? 'bg-background font-medium text-foreground shadow-sm ring-1 ring-border/70' : 'text-muted-foreground',
+      )}
+    >
       <Icon className="size-4" />
       <span>{label}</span>
-    </div>
+    </NavLink>
   )
 }

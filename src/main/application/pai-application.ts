@@ -2,7 +2,7 @@ import type { WebContents } from 'electron'
 import { AppEventBus } from '../core/app-event-bus'
 import { appendAgentOutputEvent, createAssistantMessageAccumulator, finalizeAssistantMessage, hasAssistantMessageContent } from '../core/agent-output-aggregation'
 import { type TranscriptSourceMeta } from '../core/agent-transcript'
-import { AgentDoneEvent, AgentOutputEvent, AgentRunInput, DotagentsConfig, EngineSnapshot, ProjectIssue, WorkspaceSettings } from '../core/models'
+import { AgentDoneEvent, AgentOutputEvent, AgentRunInput, DotagentsConfig, EngineSnapshot, GlobalSettings, ProjectIssue, WorkspaceSettings } from '../core/models'
 import { AgentRegistry } from '../infra/agents/agent-registry'
 import { AgentRuntime } from '../infra/agents/agent-runtime'
 import { FileWatchService } from '../infra/fs/file-watch-service'
@@ -46,6 +46,14 @@ export class PaiApplication {
     const saved = await this.store.writeWorkspaceSettings(workspacePath, settings)
     this.events.emit({ type: 'workspace.changed', workspacePath })
     return saved
+  }
+
+  readGlobalSettings() {
+    return this.store.readGlobalSettings()
+  }
+
+  writeGlobalSettings(settings: GlobalSettings) {
+    return this.store.writeGlobalSettings(settings)
   }
 
   inspectProjectFolder(projectPath: string) {

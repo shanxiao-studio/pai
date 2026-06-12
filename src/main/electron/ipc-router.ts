@@ -3,7 +3,7 @@ import { basename, extname } from 'path'
 import { readFile, stat } from 'fs/promises'
 import { PaiApplication } from '../application/pai-application'
 import { createChatAttachment, filterChatAttachments, MAX_ATTACHMENT_BYTES, type ChatAttachment } from '../core/attachments'
-import { AgentRunInput, DotagentsConfig, ProjectIssue, WorkspaceSettings } from '../core/models'
+import { AgentRunInput, DotagentsConfig, GlobalSettings, ProjectIssue, WorkspaceSettings } from '../core/models'
 import { listSkillSuggestions, searchProjectFiles } from '../core/prompt-suggestions'
 
 export function registerIpcHandlers(pai: PaiApplication) {
@@ -79,6 +79,14 @@ export function registerIpcHandlers(pai: PaiApplication) {
 
   ipcMain.handle('workspace:writeSettings', (_event, workspacePath: string, settings: WorkspaceSettings) => {
     return pai.writeWorkspaceSettings(workspacePath, settings)
+  })
+
+  ipcMain.handle('settings:readGlobal', () => {
+    return pai.readGlobalSettings()
+  })
+
+  ipcMain.handle('settings:writeGlobal', (_event, settings: GlobalSettings) => {
+    return pai.writeGlobalSettings(settings)
   })
 
   ipcMain.handle('workspace:watch', (event, workspacePath: string) => {

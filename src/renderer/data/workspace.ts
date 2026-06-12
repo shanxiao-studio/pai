@@ -11,6 +11,9 @@ export interface WorkspaceSettings {
   name: string
   description: string
   agentsMd: string
+}
+
+export interface GlobalSettings {
   theme: ThemePreference
   timezone: string
 }

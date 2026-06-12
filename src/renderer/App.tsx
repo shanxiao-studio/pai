@@ -9,7 +9,6 @@ import { ProjectProvider, useProjects } from './components/project/ProjectProvid
 import { WorkspaceProvider, useWorkspaces } from './components/workspace/WorkspaceProvider'
 import { WelcomeScreen } from './components/workspace/WelcomeScreen'
 import { applyTheme } from './lib/theme'
-import type { ThemePreference } from './data/workspace'
 import { useEffect } from 'react'
 import { electronClient } from './shared/api/electron-client'
 
@@ -25,13 +24,12 @@ function AppContent() {
   const { activeWorkspace } = useWorkspaces()
 
   useEffect(() => {
-    if (!activeWorkspace?.path) return
     let cancelled = false
-    electronClient?.readWorkspaceSettings(activeWorkspace.path).then((settings) => {
-      if (!cancelled) applyTheme(settings.theme as ThemePreference)
+    electronClient?.readGlobalSettings().then((settings) => {
+      if (!cancelled) applyTheme(settings.theme)
     })
     return () => { cancelled = true }
-  }, [activeWorkspace?.path])
+  }, [])
 
   if (!activeWorkspace) {
     return <WelcomeScreen />
@@ -62,7 +60,8 @@ function AppRoutes() {
           }
         />
         <Route path="issues" element={<AllIssuesView />} />
-        <Route path="settings" element={<SettingsView />} />
+        <Route path="settings" element={<Navigate to="/settings/global" replace />} />
+        <Route path="settings/:section" element={<SettingsView />} />
         <Route path="project/:name/*" element={<ProjectRoutes />} />
       </Route>
     </Routes>
