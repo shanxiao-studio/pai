@@ -21,7 +21,12 @@ export const PRIORITY_OPTIONS: Array<{ id: IssuePriority; title: string }> = [
 ]
 
 export function StatusDot({ status }: { status: IssueStatus }) {
-  return <Circle className={cn('size-2', status === 'backlog' ? 'stroke-dashed text-muted-foreground/35' : 'fill-current stroke-0', status === 'done' ? 'text-foreground' : status === 'in_progress' ? 'text-muted-foreground' : status === 'todo' ? 'text-muted-foreground/70' : 'text-muted-foreground/35')} />
+  return (
+    <Circle
+      className={cn('size-2', status === 'backlog' ? 'text-muted-foreground/35' : 'fill-current stroke-0', status === 'done' ? 'text-foreground' : status === 'in_progress' ? 'text-muted-foreground' : status === 'todo' ? 'text-muted-foreground/70' : 'text-muted-foreground/35')}
+      strokeDasharray={status === 'backlog' ? '2 2' : undefined}
+    />
+  )
 }
 
 export function StatusIcon({ status, showLabel = true }: { status: IssueStatus; showLabel?: boolean }) {
@@ -30,7 +35,7 @@ export function StatusIcon({ status, showLabel = true }: { status: IssueStatus; 
 
   return (
     <span className="inline-flex h-5 items-center gap-1.5 text-xs leading-none text-muted-foreground" title={option?.title ?? status}>
-      <Icon className={cn('size-4 shrink-0', status === 'backlog' && 'stroke-dashed')} />
+      <Icon className="size-4 shrink-0" strokeDasharray={status === 'backlog' ? '3 3' : undefined} />
       {showLabel && <span className="leading-none">{option?.title ?? status}</span>}
     </span>
   )

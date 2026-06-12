@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import { basename, extname } from 'path'
 import { readFile, stat } from 'fs/promises'
 import { PaiApplication } from '../application/pai-application'
@@ -55,6 +55,12 @@ export function registerIpcHandlers(pai: PaiApplication) {
 
   ipcMain.handle('app:getPath', (_event, name: string) => {
     return app.getPath(name as Parameters<typeof app.getPath>[0])
+  })
+
+  ipcMain.handle('app:openExternal', (_event, url: string) => {
+    const parsed = new URL(url)
+    if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Unsupported external URL')
+    return shell.openExternal(parsed.toString())
   })
 
   ipcMain.handle('workspace:create', (_event, params: { name: string; parentPath: string }) => {

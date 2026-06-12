@@ -674,6 +674,7 @@ export function ChatView() {
     thinking: assistantThinking,
     parts: assistantParts,
   })
+  const showEmptyState = activeMessages.length === 0 && !running
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -681,37 +682,39 @@ export function ChatView() {
 
       <div className="flex min-h-0 flex-1 bg-background/65">
         <div className="flex min-w-0 flex-1 flex-col">
-          <ScrollArea viewportRef={scrollViewportRef} onViewportScroll={updateStickToBottom} className="min-h-0 flex-1">
-            <div className="content-enter mx-auto flex w-full max-w-5xl flex-col gap-5 py-6 pl-[calc(var(--traffic-light-safe-width,0px)+2rem)] pr-8 lg:pl-[calc(var(--traffic-light-safe-width,0px)+2.5rem)] lg:pr-10">
-              {activeMessages.length === 0 && !running ? (
-                <div className="flex flex-col items-center gap-3 pt-20 text-center">
-                  <div className="flex size-12 items-center justify-center rounded-xl border bg-[hsl(var(--surface-raised))] shadow-sm shadow-black/[0.03]">
-                    <Sparkles className="size-5 text-muted-foreground" />
-                  </div>
-                  <div className="text-center">
-                    <p className="text-sm font-medium">Start a conversation with {agentLabel}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Messages are stored as Pai sessions.</p>
-                  </div>
+          {showEmptyState ? (
+            <div className="content-enter flex min-h-0 flex-1 items-center justify-center px-8 py-6 text-center">
+              <div className="flex flex-col items-center gap-3">
+                <div className="flex size-12 items-center justify-center rounded-xl border bg-[hsl(var(--surface-raised))] shadow-sm shadow-black/[0.03]">
+                  <Sparkles className="size-5 text-muted-foreground" />
                 </div>
-              ) : (
-                activeMessages.map((msg) => <SharedMessageBubble key={msg.id} message={msg} />)
-              )}
-
-              {running && hasStreamingMessage && (
-                <SharedMessageBubble message={{ id: 'stream', role: 'assistant', content: assistantContent, thinking: assistantThinking, parts: assistantParts }} streaming />
-              )}
-              {running && !hasStreamingMessage && (
-                <div className="flex items-center gap-1 px-1">
-                  <div className="flex items-center gap-1">
-                    <span className="typing-dot inline-block size-1.5 rounded-full bg-muted-foreground" style={{ animationDelay: '0ms' }} />
-                    <span className="typing-dot inline-block size-1.5 rounded-full bg-muted-foreground" style={{ animationDelay: '120ms' }} />
-                    <span className="typing-dot inline-block size-1.5 rounded-full bg-muted-foreground" style={{ animationDelay: '240ms' }} />
-                  </div>
+                <div className="text-center">
+                  <p className="text-sm font-medium">Start a conversation with {agentLabel}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Messages are stored as Pai sessions.</p>
                 </div>
-              )}
-              <div ref={messagesEndRef} />
+              </div>
             </div>
-          </ScrollArea>
+          ) : (
+            <ScrollArea viewportRef={scrollViewportRef} onViewportScroll={updateStickToBottom} className="min-h-0 flex-1">
+              <div className="content-enter mx-auto flex w-full max-w-5xl flex-col gap-5 py-6 pl-[calc(var(--traffic-light-safe-width,0px)+2rem)] pr-8 lg:pl-[calc(var(--traffic-light-safe-width,0px)+2.5rem)] lg:pr-10">
+                {activeMessages.map((msg) => <SharedMessageBubble key={msg.id} message={msg} />)}
+
+                {running && hasStreamingMessage && (
+                  <SharedMessageBubble message={{ id: 'stream', role: 'assistant', content: assistantContent, thinking: assistantThinking, parts: assistantParts }} streaming />
+                )}
+                {running && !hasStreamingMessage && (
+                  <div className="flex items-center gap-1 px-1">
+                    <div className="flex items-center gap-1">
+                      <span className="typing-dot inline-block size-1.5 rounded-full bg-muted-foreground" style={{ animationDelay: '0ms' }} />
+                      <span className="typing-dot inline-block size-1.5 rounded-full bg-muted-foreground" style={{ animationDelay: '120ms' }} />
+                      <span className="typing-dot inline-block size-1.5 rounded-full bg-muted-foreground" style={{ animationDelay: '240ms' }} />
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+            </ScrollArea>
+          )}
 
           <PromptComposer
             value={input} onChange={setInput} onSubmit={handleSubmit}

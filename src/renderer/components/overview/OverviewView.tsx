@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { Bot, Check, Github } from 'lucide-react'
+import { Bot, Check, Github, Settings, X } from 'lucide-react'
+import { siAnthropic, siClaude, siClaudecode, siPi } from 'simple-icons'
 import { EditableLabels, StatusPicker } from '@/components/issues/IssueControls'
 import { PropertyField, PropertyPanel } from '@/components/project/PropertyPanel'
 import { ProjectTabs } from '@/components/project/ProjectTabs'
 import { useProjects } from '@/components/project/ProjectProvider'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { IssueStatus, ProjectConfig } from '@/data/project'
@@ -55,6 +57,9 @@ function ProjectOverview({ project, updateProject }: { project: ProjectConfig; u
   const [description, setDescription] = useState(project.description)
   const [projectStatus, setProjectStatus] = useState(project.status)
   const [githubLink, setGithubLink] = useState(project.githubLink)
+  const [repoDialogOpen, setRepoDialogOpen] = useState(false)
+  const [repoDraft, setRepoDraft] = useState(project.githubLink)
+  const [repoError, setRepoError] = useState('')
   const [labels, setLabels] = useState(project.labels.join(', '))
   const [agentsMd, setAgentsMd] = useState(project.agentsMd)
 
@@ -71,6 +76,9 @@ function ProjectOverview({ project, updateProject }: { project: ProjectConfig; u
     setDescription(project.description)
     setProjectStatus(project.status)
     setGithubLink(project.githubLink)
+    setRepoDraft(project.githubLink)
+    setRepoError('')
+    setRepoDialogOpen(false)
     setLabels(project.labels.join(', '))
     setAgentsMd(project.agentsMd)
     lastOverviewSnapshot.current = JSON.stringify({
@@ -207,6 +215,35 @@ function ProjectOverview({ project, updateProject }: { project: ProjectConfig; u
     : agents
   const activeAgent = agentOptions.find((agent) => agent.kind === agentKind)
   const projectLabels = parseLabels(labels)
+  const repositoryLabel = formatRepositoryLabel(githubLink)
+  const repositoryUrl = formatRepositoryUrl(githubLink)
+
+  const openRepositoryDialog = () => {
+    setRepoDraft(githubLink)
+    setRepoError('')
+    setRepoDialogOpen(true)
+  }
+
+  const openRepository = () => {
+    if (!repositoryUrl) {
+      openRepositoryDialog()
+      return
+    }
+
+    void electronClient?.openExternalUrl(repositoryUrl)
+  }
+
+  const saveRepository = () => {
+    const normalized = repoDraft.trim()
+    if (!isGithubRepositoryUrl(normalized)) {
+      setRepoError('Enter a GitHub repository URL like https://github.com/org/repo.')
+      return
+    }
+
+    setGithubLink(normalized)
+    setRepoDialogOpen(false)
+    setRepoError('')
+  }
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -227,7 +264,7 @@ function ProjectOverview({ project, updateProject }: { project: ProjectConfig; u
                   value={description}
                   onChange={(event) => setDescription(event.target.value)}
                   aria-label="Project description"
-                  placeholder="agent 项目编排"
+                  placeholder="Add a project description..."
                   className="h-auto border-0 bg-transparent px-0 py-0 text-sm text-muted-foreground shadow-none placeholder:text-muted-foreground focus-visible:ring-0"
                 />
               </div>
@@ -268,16 +305,27 @@ function ProjectOverview({ project, updateProject }: { project: ProjectConfig; u
               <StatusPicker value={projectStatus} onChange={setProjectStatus} />
             </PropertyField>
             <PropertyField label="Repository">
-              <div className="flex w-full items-center gap-1.5 rounded-md px-1.5 hover:bg-muted focus-within:bg-muted">
-                <Github className="size-3.5 shrink-0 text-muted-foreground" />
-                <Input
-                  value={githubLink}
-                  onChange={(event) => setGithubLink(event.target.value)}
-                  aria-label="Project repository"
-                  placeholder="owner/repo"
-                  className="h-7 border-0 bg-transparent px-0 text-xs shadow-none focus-visible:ring-0"
-                  title={githubLink}
-                />
+              <div className="group flex w-full min-w-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={openRepository}
+                  className="pressable flex h-7 min-w-0 flex-1 items-center gap-1.5 rounded-md px-1.5 text-left text-xs hover:bg-muted"
+                  title={repositoryUrl || githubLink}
+                >
+                  <Github className="size-3.5 shrink-0 text-muted-foreground" />
+                  <span className={cn('min-w-0 flex-1 truncate', repositoryLabel ? 'text-foreground' : 'text-muted-foreground')}>
+                    {repositoryLabel || 'Set repository'}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={openRepositoryDialog}
+                  className="pressable flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100 group-focus-within:opacity-100"
+                  aria-label="Edit repository"
+                  title="Edit repository"
+                >
+                  <Settings className="size-3.5" />
+                </button>
               </div>
             </PropertyField>
             <PropertyField label="Labels">
@@ -290,8 +338,93 @@ function ProjectOverview({ project, updateProject }: { project: ProjectConfig; u
           </PropertyPanel>
         </aside>
       </div>
+
+      {repoDialogOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 px-4" onMouseDown={() => setRepoDialogOpen(false)}>
+          <form
+            className="popover-enter w-full max-w-md rounded-lg border bg-popover p-4 shadow-xl shadow-black/15"
+            onMouseDown={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault()
+              saveRepository()
+            }}
+          >
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <h2 className="text-sm font-semibold">Repository</h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRepoDialogOpen(false)}
+                className="pressable flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                aria-label="Close repository editor"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+            <label className="grid gap-2">
+              <span className="text-xs font-medium text-muted-foreground">GitHub URL</span>
+              <Input
+                value={repoDraft}
+                onChange={(event) => {
+                  setRepoDraft(event.target.value)
+                  setRepoError('')
+                }}
+                placeholder="https://github.com/org/repo"
+                aria-label="GitHub repository URL"
+                autoFocus
+              />
+            </label>
+            {repoError && <p className="mt-2 text-xs text-destructive">{repoError}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <Button type="button" variant="ghost" onClick={() => setRepoDialogOpen(false)}>Cancel</Button>
+              <Button type="submit">Save</Button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   )
+}
+
+function formatRepositoryLabel(value: string) {
+  const parsed = parseGithubRepository(value)
+  return parsed ? `${parsed.owner}/${parsed.repo}` : value.trim()
+}
+
+function formatRepositoryUrl(value: string) {
+  const parsed = parseGithubRepository(value)
+  return parsed ? `https://github.com/${parsed.owner}/${parsed.repo}` : ''
+}
+
+function isGithubRepositoryUrl(value: string) {
+  return parseGithubRepository(value)?.kind === 'web'
+}
+
+function parseGithubRepository(value: string): { owner: string; repo: string; kind: 'web' | 'ssh' } | null {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+
+  try {
+    const parsed = new URL(trimmed)
+    if (!['http:', 'https:'].includes(parsed.protocol)) return null
+    if (!['github.com', 'www.github.com'].includes(parsed.hostname.toLowerCase())) return null
+    const parts = parsed.pathname.split('/').filter(Boolean)
+    if (parts.length !== 2) return null
+    const repo = stripGitSuffix(parts[1])
+    if (!parts[0] || !repo) return null
+    return { owner: parts[0], repo, kind: 'web' }
+  } catch {
+    const match = /^git@github\.com:([^/]+)\/(.+?)(?:\.git)?$/i.exec(trimmed)
+    if (!match) return null
+    const repo = stripGitSuffix(match[2])
+    if (!match[1] || !repo) return null
+    return { owner: match[1], repo, kind: 'ssh' }
+  }
+}
+
+function stripGitSuffix(value: string) {
+  return value.endsWith('.git') ? value.slice(0, -4) : value
 }
 
 function parseLabels(value: string) {
@@ -356,7 +489,7 @@ function AgentPicker({
         disabled={!loaded}
         className="pressable flex h-7 w-full items-center gap-1.5 rounded-md px-1.5 text-left text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
       >
-        <Bot className="size-3.5 shrink-0 text-muted-foreground" />
+        <AgentIcon kind={value} className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="min-w-0 flex-1 truncate">{selectedLabel}</span>
         {activeAgent?.available === false && <span className="text-muted-foreground">Missing</span>}
       </button>
@@ -376,7 +509,7 @@ function AgentPicker({
                 option.kind === value && 'bg-accent font-medium',
               )}
             >
-              <Bot className="size-3.5 text-muted-foreground" />
+              <AgentIcon kind={option.kind} className="size-3.5 text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate">{agentLabel(option.kind)}</span>
               {option.kind === value && <Check className="size-3.5" />}
             </button>
@@ -385,6 +518,26 @@ function AgentPicker({
       )}
     </div>
   )
+}
+
+function AgentIcon({ kind, className }: { kind: string; className?: string }) {
+  const icon = simpleIconForAgent(kind)
+  if (!icon) return <Bot className={className} />
+
+  return (
+    <svg className={className} role="img" aria-label={icon.title} viewBox="0 0 24 24" fill="currentColor">
+      <path d={icon.path} />
+    </svg>
+  )
+}
+
+function simpleIconForAgent(kind: string): { title: string; path: string } | null {
+  const key = kind.trim().toLowerCase().replace(/[\s_-]+/g, '')
+  if (key === 'anthropic') return siAnthropic
+  if (key === 'claude') return siClaude
+  if (key === 'claudecode') return siClaudecode
+  if (key === 'pi') return siPi
+  return null
 }
 
 function readAgentKind(config: Record<string, unknown> | undefined) {

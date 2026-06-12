@@ -60,6 +60,7 @@ declare global {
       listPromptSkills: (projectPath: string) => Promise<SkillSuggestion[]>
       searchProjectFiles: (projectPath: string, query: string) => Promise<string[]>
       getPath: (name: string) => Promise<string>
+      openExternalUrl: (url: string) => Promise<void>
       importProject: () => Promise<ImportedProject | null>
       createWorkspace: (name: string, parentPath: string) => Promise<{ name: string; path: string }>
       readConfig: (folderPath: string) => Promise<ImportedProject[]>

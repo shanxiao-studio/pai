@@ -47,6 +47,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   listPromptSkills: (projectPath: string) => ipcRenderer.invoke('prompt:listSkills', projectPath) as Promise<SkillSuggestion[]>,
   searchProjectFiles: (projectPath: string, query: string) => ipcRenderer.invoke('prompt:searchFiles', projectPath, query) as Promise<string[]>,
   getPath: (name: string) => ipcRenderer.invoke('app:getPath', name),
+  openExternalUrl: (url: string) => ipcRenderer.invoke('app:openExternal', url) as Promise<void>,
   importProject: () => ipcRenderer.invoke('project:importFolder'),
   createWorkspace: (name: string, parentPath: string) => ipcRenderer.invoke('workspace:create', { name, parentPath }),
   readConfig: (folderPath: string) => ipcRenderer.invoke('workspace:readConfig', folderPath),

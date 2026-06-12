@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Circle, Columns3, List } from 'lucide-react'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -311,13 +311,20 @@ function GlobalIssueCard({
   onDragEnd: () => void
 }) {
   const { issue, projectSlug, projectName } = projectIssue
+  const cardRef = useRef<HTMLElement>(null)
+
+  const handleDragStart = (event: React.DragEvent) => {
+    if (cardRef.current) setCardDragImage(event, cardRef.current)
+    onDragStart(event)
+  }
 
   return (
     <article
+      ref={cardRef}
       draggable
       aria-grabbed={dragging}
       className={cn('pressable cursor-grab rounded-md border bg-[hsl(var(--surface-raised))] p-3 shadow-sm shadow-black/[0.025] hover:border-muted-foreground/30 active:cursor-grabbing active:scale-[0.99]', dragging && 'opacity-55')}
-      onDragStart={onDragStart}
+      onDragStart={handleDragStart}
       onDragEnd={onDragEnd}
     >
       <Link to={`/project/${projectSlug}/issues/${issue.id}`} className="block truncate text-sm font-medium leading-5 hover:text-primary">
@@ -330,6 +337,11 @@ function GlobalIssueCard({
       </div>
     </article>
   )
+}
+
+function setCardDragImage(event: React.DragEvent, card: HTMLElement) {
+  const rect = card.getBoundingClientRect()
+  event.dataTransfer.setDragImage(card, event.clientX - rect.left, event.clientY - rect.top)
 }
 
 function normalizeIssue(issue: Pick<Issue, 'id' | 'title'> & {

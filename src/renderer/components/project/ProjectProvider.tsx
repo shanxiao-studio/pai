@@ -172,6 +172,7 @@ function normalizeProjects(projects: ProjectConfig[]) {
     seenPaths.add(key)
     normalized.push({
       ...project,
+      description: project.description ?? '',
       status: normalizeProjectStatus(project.status),
       slug: uniqueSlug(project.slug, normalized),
     })

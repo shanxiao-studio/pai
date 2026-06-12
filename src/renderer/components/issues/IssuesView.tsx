@@ -448,13 +448,21 @@ function IssueCard({
   onDragStart: (event: React.DragEvent) => void
   onDragEnd: () => void
 }) {
+  const cardRef = useRef<HTMLElement>(null)
+
+  const handleDragStart = (event: React.DragEvent) => {
+    if (cardRef.current) setCardDragImage(event, cardRef.current)
+    onDragStart(event)
+  }
+
   return (
     <article
+      ref={cardRef}
       draggable
       aria-grabbed={dragging}
       className={cn('pressable cursor-grab rounded-md border bg-[hsl(var(--surface-raised))] p-3 shadow-sm shadow-black/[0.025] hover:border-muted-foreground/30 active:cursor-grabbing active:scale-[0.99]', dragging && 'opacity-55')}
       onContextMenu={(event) => onContextMenu(event, issue)}
-      onDragStart={onDragStart}
+      onDragStart={handleDragStart}
       onDragEnd={onDragEnd}
     >
       <Link to={`${issue.id}`} className="block truncate text-sm font-medium leading-5 hover:text-primary">
@@ -466,6 +474,11 @@ function IssueCard({
       </div>
     </article>
   )
+}
+
+function setCardDragImage(event: React.DragEvent, card: HTMLElement) {
+  const rect = card.getBoundingClientRect()
+  event.dataTransfer.setDragImage(card, event.clientX - rect.left, event.clientY - rect.top)
 }
 
 function ProjectPicker({
